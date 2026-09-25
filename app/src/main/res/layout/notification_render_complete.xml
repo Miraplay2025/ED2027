@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp">
+
+    <ImageView
+        android:id="@+id/img_success_icon"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:src="@android:drawable/presence_online"
+        android:contentDescription="Sucesso" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="8dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/txt_notification_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="100% Concluído — Vídeo Salvo!"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:textColor="#10B981"
+            android:singleLine="true" />
+
+        <TextView
+            android:id="@+id/txt_notification_message"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Vídeo renderizado e salvo com sucesso!"
+            android:textSize="12sp"
+            android:maxLines="2" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/btn_close_notification"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:gravity="center"
+        android:text="✕"
+        android:textStyle="bold"
+        android:textSize="18sp"
+        android:textColor="#EF4444"
+        android:contentDescription="Fechar notificação" />
+
+</LinearLayout>

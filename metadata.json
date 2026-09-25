@@ -1,0 +1,7 @@
+{
+  "name": "Editor Automático",
+  "description": "Editor profissional de vídeo automatizado com animações de câmera, transições suaves, efeitos sonoros rápidos e exportação em segundo plano",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

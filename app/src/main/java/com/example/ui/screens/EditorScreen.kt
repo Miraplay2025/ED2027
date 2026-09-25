@@ -32,11 +32,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BrandingWatermark
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
@@ -75,6 +78,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.VideoBitratePreset
 import com.example.ui.components.AppMediaGalleryDialog
 import com.example.ui.components.AppZipBrowserDialog
+import com.example.ui.components.CtaVideosCarousel
 import com.example.ui.components.LivePreviewStage
 import com.example.ui.components.MasterConfigDialog
 import com.example.ui.components.MovementsCarousel
@@ -133,9 +137,25 @@ fun EditorScreen(
     val selectedFps by viewModel.selectedFps.collectAsStateWithLifecycle()
     val selectedBitrateMbps by viewModel.selectedBitrateMbps.collectAsStateWithLifecycle()
     val isMediaGalleryOpen by viewModel.isMediaGalleryOpen.collectAsStateWithLifecycle()
+    val isLogoGalleryOpen by viewModel.isLogoGalleryOpen.collectAsStateWithLifecycle()
     val isZipBrowserOpen by viewModel.isZipBrowserOpen.collectAsStateWithLifecycle()
     val zipWarningMessage by viewModel.zipWarningMessage.collectAsStateWithLifecycle()
     val validationBannerMessage by viewModel.validationBannerMessage.collectAsStateWithLifecycle()
+
+    val allCtaItems by viewModel.allCtaItems.collectAsStateWithLifecycle()
+    val selectedCta by viewModel.selectedCta.collectAsStateWithLifecycle()
+    val ctaStartTimeText by viewModel.ctaStartTimeText.collectAsStateWithLifecycle()
+    val ctaTimeErrorMessage by viewModel.ctaTimeErrorMessage.collectAsStateWithLifecycle()
+    val ctaNormalizedX by viewModel.ctaNormalizedX.collectAsStateWithLifecycle()
+    val ctaNormalizedY by viewModel.ctaNormalizedY.collectAsStateWithLifecycle()
+    val ctaScale by viewModel.ctaScale.collectAsStateWithLifecycle()
+    val isCtaSelectedOnPreview by viewModel.isCtaSelectedOnPreview.collectAsStateWithLifecycle()
+
+    val logoFilePath by viewModel.logoFilePath.collectAsStateWithLifecycle()
+    val logoNormalizedX by viewModel.logoNormalizedX.collectAsStateWithLifecycle()
+    val logoNormalizedY by viewModel.logoNormalizedY.collectAsStateWithLifecycle()
+    val logoScale by viewModel.logoScale.collectAsStateWithLifecycle()
+    val isLogoSelectedOnPreview by viewModel.isLogoSelectedOnPreview.collectAsStateWithLifecycle()
 
     // ActivityResultLaunchers para seleção de arquivos
 
@@ -154,6 +174,15 @@ fun EditorScreen(
     ) { uri: Uri? ->
         if (uri != null) {
             viewModel.uploadCustomSound(uri)
+        }
+    }
+
+    // 3. Upload de Vídeo Próprio de CTA (verifica Chroma Key / Fundo Sólido automaticamente)
+    val customCtaVideoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.uploadCustomCtaVideo(uri)
         }
     }
 
@@ -372,6 +401,19 @@ fun EditorScreen(
                 isPlaying = isTestPlaying,
                 onTogglePlay = { viewModel.toggleTestPlaying() },
                 transitionDurationSeconds = transitionDurationSeconds,
+                selectedCta = selectedCta,
+                ctaNormalizedX = ctaNormalizedX,
+                ctaNormalizedY = ctaNormalizedY,
+                ctaScale = ctaScale,
+                onCtaPositionChange = { nx, ny -> viewModel.updateCtaPosition(nx, ny) },
+                onCtaScaleChange = { sc -> viewModel.updateCtaScale(sc) },
+                logoImagePath = logoFilePath,
+                logoNormalizedX = logoNormalizedX,
+                logoNormalizedY = logoNormalizedY,
+                logoScale = logoScale,
+                onLogoPositionChange = { nx, ny -> viewModel.updateLogoPosition(nx, ny) },
+                onLogoScaleChange = { sc -> viewModel.updateLogoScale(sc) },
+                onRemoveLogo = { viewModel.removeLogo() },
                 modifier = Modifier.padding(horizontal = 14.dp)
             )
 
@@ -466,10 +508,40 @@ fun EditorScreen(
                                     .widthIn(min = itemMinWidth)
                                     .testTag("btn_category_transition_sounds")
                             )
+
+                            ResourceCategoryButton(
+                                title = "CTA",
+                                subtitle = if (selectedCta.id == 0) {
+                                    "Sem CTA"
+                                } else {
+                                    "${selectedCta.fileName} • ${if (ctaStartTimeText.isNotBlank()) "${ctaStartTimeText}s" else "Definir tempo"}"
+                                },
+                                icon = Icons.Default.Campaign,
+                                accentColor = Color(0xFF00E676),
+                                onClick = { viewModel.openResourcePanel(ResourcePanelTab.CTA_VIDEOS) },
+                                modifier = Modifier
+                                    .widthIn(min = itemMinWidth)
+                                    .testTag("btn_category_cta")
+                            )
+
+                            ResourceCategoryButton(
+                                title = "LOGO",
+                                subtitle = if (!logoFilePath.isNullOrBlank()) {
+                                    "Logo Ativo na Tela"
+                                } else {
+                                    "Selecionar Imagem"
+                                },
+                                icon = Icons.Default.BrandingWatermark,
+                                accentColor = Color(0xFF38BDF8),
+                                onClick = { viewModel.onLogoButtonClick() },
+                                modifier = Modifier
+                                    .widthIn(min = itemMinWidth)
+                                    .testTag("btn_category_logo")
+                            )
                         }
                     }
                 } else {
-                    // Estado Aberto: Todos os 3 botões ocultos, Seta de Voltar visível + Recursos do botão clicado
+                    // Estado Aberto: Todos os botões ocultos, Seta de Voltar visível + Recursos do botão clicado
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -513,6 +585,7 @@ fun EditorScreen(
                                             ResourcePanelTab.CAMERA_ANIMATION -> "ANIMAÇÃO DE CÂMERA"
                                             ResourcePanelTab.TRANSITION_EFFECTS -> "EFEITOS DE TRANSIÇÕES"
                                             ResourcePanelTab.TRANSITION_SOUNDS -> "SONS DE TRANSIÇÃO"
+                                            ResourcePanelTab.CTA_VIDEOS -> "CTA • VÍDEOS DE CHAMADA (.WEBM)"
                                         },
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.ExtraBold,
@@ -551,6 +624,20 @@ fun EditorScreen(
                                     onSelectSound = { viewModel.selectSound(it) },
                                     onUploadSound = { customSoundLauncher.launch("audio/*") },
                                     onDeleteSound = { viewModel.deleteCustomSound(it) },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            ResourcePanelTab.CTA_VIDEOS -> {
+                                CtaVideosCarousel(
+                                    availableCtas = allCtaItems,
+                                    selectedCta = selectedCta,
+                                    onSelectCta = { viewModel.selectCta(it) },
+                                    onUploadCustomCta = { customCtaVideoLauncher.launch("video/*") },
+                                    onDeleteCta = { viewModel.deleteCtaVideo(it) },
+                                    ctaStartTimeText = ctaStartTimeText,
+                                    onCtaStartTimeChange = { viewModel.updateCtaStartTimeText(it) },
+                                    ctaTimeError = ctaTimeErrorMessage,
+                                    ctaUploadError = null,
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
@@ -669,6 +756,21 @@ fun EditorScreen(
         onConfirmSelection = { selectedUris ->
             viewModel.importDirectImages(context, selectedUris)
         }
+    )
+
+    // Galeria do App para Seleção de Imagem de LOGO (apenas imagens permitidas)
+    AppMediaGalleryDialog(
+        isOpen = isLogoGalleryOpen,
+        onDismiss = { viewModel.closeLogoGallery() },
+        onConfirmSelection = { selectedUris ->
+            selectedUris.firstOrNull()?.let { logoUri ->
+                viewModel.selectLogoFromGallery(context, logoUri)
+            }
+        },
+        imagesOnly = true,
+        singleSelection = true,
+        dialogTitle = "Galeria do App • Selecionar Logo",
+        dialogSubtitle = "Selecione apenas 1 imagem para exibir como Logo em todo o vídeo"
     )
 
     // Espaço do Próprio App para Seleção de Arquivos ZIP no Dispositivo

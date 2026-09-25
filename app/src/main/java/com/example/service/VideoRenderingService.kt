@@ -23,6 +23,9 @@ import com.example.data.local.AppPreferences
 import com.example.data.model.MovementEffect
 import com.example.data.model.ParsedAnimationConfig
 import com.example.data.model.TransitionEffect
+import com.example.engine.CtaRenderOverlayConfig
+import com.example.engine.CtaVideoEngine
+import com.example.engine.LogoRenderOverlayConfig
 import com.example.engine.RenderSequenceItem
 import com.example.engine.RenderingManager
 import com.example.engine.VideoEncoder
@@ -106,6 +109,17 @@ class VideoRenderingService : Service() {
         val transitionSoundIds = intent.getIntegerArrayListExtra(EXTRA_TRANSITION_SOUND_IDS) ?: arrayListOf<Int>()
         val transitionDurationSeconds = intent.getFloatExtra(EXTRA_TRANSITION_DURATION, 1.0f).coerceIn(0.4f, 6.0f)
 
+        val ctaId = intent.getIntExtra(EXTRA_CTA_ID, 0)
+        val ctaStartTimeSeconds = intent.getFloatExtra(EXTRA_CTA_START_TIME, -1f)
+        val ctaNormX = intent.getFloatExtra(EXTRA_CTA_NORM_X, 0.5f)
+        val ctaNormY = intent.getFloatExtra(EXTRA_CTA_NORM_Y, 0.78f)
+        val ctaScale = intent.getFloatExtra(EXTRA_CTA_SCALE, 0.36f)
+
+        val logoFilePath = intent.getStringExtra(EXTRA_LOGO_FILE_PATH)
+        val logoNormX = intent.getFloatExtra(EXTRA_LOGO_NORM_X, 0.84f)
+        val logoNormY = intent.getFloatExtra(EXTRA_LOGO_NORM_Y, 0.16f)
+        val logoScale = intent.getFloatExtra(EXTRA_LOGO_SCALE, 0.18f)
+
         if (projectId == -1L || configs.isNullOrEmpty()) {
             stopSelf()
             return START_NOT_STICKY
@@ -113,6 +127,7 @@ class VideoRenderingService : Service() {
 
         // Garante que o diretório padrão exista fisicamente antes de iniciar qualquer renderização
         AppPreferences.getInstance(applicationContext).ensureDefaultDirectory()
+        CtaVideoEngine.init(applicationContext)
 
         isNotificationHiddenByUser = false
         startForeground(NOTIFICATION_ID, buildNotification("Iniciando renderização de vídeo unificado...", 0, configs.size, 0))
@@ -129,7 +144,16 @@ class VideoRenderingService : Service() {
                 videoHeight = videoHeight,
                 videoFps = videoFps,
                 videoBitrate = videoBitrate,
-                resolutionLabel = resolutionLabel
+                resolutionLabel = resolutionLabel,
+                ctaId = ctaId,
+                ctaStartTimeSeconds = ctaStartTimeSeconds,
+                ctaNormX = ctaNormX,
+                ctaNormY = ctaNormY,
+                ctaScale = ctaScale,
+                logoFilePath = logoFilePath,
+                logoNormX = logoNormX,
+                logoNormY = logoNormY,
+                logoScale = logoScale
             )
         }
 
@@ -147,7 +171,16 @@ class VideoRenderingService : Service() {
         videoHeight: Int,
         videoFps: Int,
         videoBitrate: Int,
-        resolutionLabel: String
+        resolutionLabel: String,
+        ctaId: Int = 0,
+        ctaStartTimeSeconds: Float = -1f,
+        ctaNormX: Float = 0.5f,
+        ctaNormY: Float = 0.78f,
+        ctaScale: Float = 0.36f,
+        logoFilePath: String? = null,
+        logoNormX: Float = 0.84f,
+        logoNormY: Float = 0.16f,
+        logoScale: Float = 0.18f
     ) {
         val totalImages = configs.size
         RenderingManager.startBatch(totalImages)
@@ -214,6 +247,42 @@ class VideoRenderingService : Service() {
 
         RenderingManager.log("Processando sequência de ${sequenceItems.size} cenas em um único arquivo de vídeo...")
 
+        val totalVideoDurationSec = sequenceItems.sumOf { it.durationSeconds.toDouble() }.toFloat()
+
+        // Configura overlay de CTA caso selecionado e dentro do tempo do vídeo final
+        val ctaOverlayConfig: CtaRenderOverlayConfig? = if (ctaId != 0 && ctaStartTimeSeconds >= 0f) {
+            if (ctaStartTimeSeconds >= totalVideoDurationSec) {
+                RenderingManager.log("Aviso CTA: Tempo informado (${ctaStartTimeSeconds}s) ultrapassa a duração do vídeo final (${totalVideoDurationSec}s). Inclusão de CTA ignorada.")
+                null
+            } else {
+                val matchedCta = CtaVideoEngine.allCtaItems.value.find { it.id == ctaId }
+                if (matchedCta != null && matchedCta.id != 0) {
+                    RenderingManager.log("CTA aplicado: ${matchedCta.fileName} em ${ctaStartTimeSeconds}s (Posição X=${(ctaNormX * 100).toInt()}%, Y=${(ctaNormY * 100).toInt()}%)")
+                    CtaRenderOverlayConfig(
+                        ctaItem = matchedCta,
+                        startTimeSeconds = ctaStartTimeSeconds,
+                        normalizedX = ctaNormX,
+                        normalizedY = ctaNormY,
+                        scale = ctaScale
+                    )
+                } else null
+            }
+        } else null
+
+        // Configura overlay de Logo contínuo (do início ao fim do vídeo)
+        val logoOverlayConfig: LogoRenderOverlayConfig? = if (!logoFilePath.isNullOrBlank()) {
+            val lFile = File(logoFilePath)
+            if (lFile.exists()) {
+                RenderingManager.log("Logo aplicado durante todo o vídeo (início ao fim): ${lFile.name}")
+                LogoRenderOverlayConfig(
+                    logoFile = lFile,
+                    normalizedX = logoNormX,
+                    normalizedY = logoNormY,
+                    scale = logoScale
+                )
+            } else null
+        } else null
+
         val tempOutputFile = File(cacheDir, "video_unificado_${System.currentTimeMillis()}.mp4")
 
         val success = VideoEncoder.encodeUnifiedSequenceToVideo(
@@ -224,6 +293,8 @@ class VideoRenderingService : Service() {
             frameRate = videoFps,
             bitRate = videoBitrate,
             transitionDurationSeconds = transitionDurationSeconds,
+            ctaOverlay = ctaOverlayConfig,
+            logoOverlay = logoOverlayConfig,
             onGlobalProgress = { currentFrame, totalFrames, currentImgIndex, statusText ->
                 val overallPercent = ((currentFrame.toFloat() / totalFrames) * 100).toInt().coerceIn(0, 100)
                 updateNotification(
@@ -523,6 +594,15 @@ class VideoRenderingService : Service() {
         const val EXTRA_TRANSITION_IDS = "extra_transition_ids"
         const val EXTRA_TRANSITION_SOUND_IDS = "extra_transition_sound_ids"
         const val EXTRA_TRANSITION_DURATION = "extra_transition_duration"
+        const val EXTRA_CTA_ID = "extra_cta_id"
+        const val EXTRA_CTA_START_TIME = "extra_cta_start_time"
+        const val EXTRA_CTA_NORM_X = "extra_cta_norm_x"
+        const val EXTRA_CTA_NORM_Y = "extra_cta_norm_y"
+        const val EXTRA_CTA_SCALE = "extra_cta_scale"
+        const val EXTRA_LOGO_FILE_PATH = "extra_logo_file_path"
+        const val EXTRA_LOGO_NORM_X = "extra_logo_norm_x"
+        const val EXTRA_LOGO_NORM_Y = "extra_logo_norm_y"
+        const val EXTRA_LOGO_SCALE = "extra_logo_scale"
 
         @Volatile
         var isAppInForeground: Boolean = false
@@ -559,7 +639,16 @@ class VideoRenderingService : Service() {
             resolutionLabel: String = "720p (1280x720) [HD]",
             transitionIds: List<Int> = listOf(1),
             transitionSoundIds: List<Int> = emptyList(),
-            transitionDurationSeconds: Float = 1.0f
+            transitionDurationSeconds: Float = 1.0f,
+            ctaId: Int = 0,
+            ctaStartTimeSeconds: Float = -1f,
+            ctaNormX: Float = 0.5f,
+            ctaNormY: Float = 0.78f,
+            ctaScale: Float = 0.36f,
+            logoFilePath: String? = null,
+            logoNormX: Float = 0.84f,
+            logoNormY: Float = 0.16f,
+            logoScale: Float = 0.18f
         ) {
             val parcelList = ArrayList(configs.map {
                 RenderConfigParcel(it.imageIndex, it.movementId, it.durationSeconds)
@@ -577,6 +666,15 @@ class VideoRenderingService : Service() {
                 putExtra(EXTRA_VIDEO_FPS, videoFps)
                 putExtra(EXTRA_VIDEO_BITRATE, videoBitrateBps)
                 putExtra(EXTRA_RESOLUTION_LABEL, resolutionLabel)
+                putExtra(EXTRA_CTA_ID, ctaId)
+                putExtra(EXTRA_CTA_START_TIME, ctaStartTimeSeconds)
+                putExtra(EXTRA_CTA_NORM_X, ctaNormX)
+                putExtra(EXTRA_CTA_NORM_Y, ctaNormY)
+                putExtra(EXTRA_CTA_SCALE, ctaScale)
+                putExtra(EXTRA_LOGO_FILE_PATH, logoFilePath)
+                putExtra(EXTRA_LOGO_NORM_X, logoNormX)
+                putExtra(EXTRA_LOGO_NORM_Y, logoNormY)
+                putExtra(EXTRA_LOGO_SCALE, logoScale)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)

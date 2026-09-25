@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.AppDatabase
 import com.example.data.local.AppPreferences
+import com.example.data.model.CtaVideoItem
 import com.example.data.model.MovementEffect
 import com.example.data.model.Project
 import com.example.data.model.ProjectImage
@@ -18,6 +19,8 @@ import com.example.data.model.VideoBitratePreset
 import com.example.data.model.VideoFps
 import com.example.data.model.VideoResolution
 import com.example.data.repository.ProjectRepository
+import com.example.engine.CtaImportResult
+import com.example.engine.CtaVideoEngine
 import com.example.engine.ImageImportHelper
 import com.example.engine.ImageImportResult
 import com.example.engine.MediaHelper
@@ -46,7 +49,8 @@ import java.io.File
 enum class ResourcePanelTab {
     CAMERA_ANIMATION,
     TRANSITION_EFFECTS,
-    TRANSITION_SOUNDS
+    TRANSITION_SOUNDS,
+    CTA_VIDEOS
 }
 
 class EditorViewModel(application: Application) : AndroidViewModel(application) {
@@ -138,8 +142,51 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _isMediaGalleryOpen = MutableStateFlow(false)
     val isMediaGalleryOpen: StateFlow<Boolean> = _isMediaGalleryOpen.asStateFlow()
 
+    private val _isLogoGalleryOpen = MutableStateFlow(false)
+    val isLogoGalleryOpen: StateFlow<Boolean> = _isLogoGalleryOpen.asStateFlow()
+
     private val _isZipBrowserOpen = MutableStateFlow(false)
     val isZipBrowserOpen: StateFlow<Boolean> = _isZipBrowserOpen.asStateFlow()
+
+    // Vídeos de CTA (10 opções iniciais: Sem CTA + CTA1.WEBM..CTA9.WEBM na pasta VIDEOS CTA + uploads com Chroma Key)
+    val allCtaItems: StateFlow<List<CtaVideoItem>> = CtaVideoEngine.allCtaItems
+
+    private val _selectedCta = MutableStateFlow(CtaVideoItem.NONE)
+    val selectedCta: StateFlow<CtaVideoItem> = _selectedCta.asStateFlow()
+
+    private val _ctaStartTimeText = MutableStateFlow("")
+    val ctaStartTimeText: StateFlow<String> = _ctaStartTimeText.asStateFlow()
+
+    private val _ctaTimeErrorMessage = MutableStateFlow<String?>(null)
+    val ctaTimeErrorMessage: StateFlow<String?> = _ctaTimeErrorMessage.asStateFlow()
+
+    private val _ctaNormalizedX = MutableStateFlow(0.50f)
+    val ctaNormalizedX: StateFlow<Float> = _ctaNormalizedX.asStateFlow()
+
+    private val _ctaNormalizedY = MutableStateFlow(0.78f)
+    val ctaNormalizedY: StateFlow<Float> = _ctaNormalizedY.asStateFlow()
+
+    private val _ctaScale = MutableStateFlow(0.36f)
+    val ctaScale: StateFlow<Float> = _ctaScale.asStateFlow()
+
+    private val _isCtaSelectedOnPreview = MutableStateFlow(false)
+    val isCtaSelectedOnPreview: StateFlow<Boolean> = _isCtaSelectedOnPreview.asStateFlow()
+
+    // Logo de Imagem sobreposto na tela de pré-visualização e no vídeo final do início ao fim
+    private val _logoFilePath = MutableStateFlow<String?>(null)
+    val logoFilePath: StateFlow<String?> = _logoFilePath.asStateFlow()
+
+    private val _logoNormalizedX = MutableStateFlow(0.84f)
+    val logoNormalizedX: StateFlow<Float> = _logoNormalizedX.asStateFlow()
+
+    private val _logoNormalizedY = MutableStateFlow(0.16f)
+    val logoNormalizedY: StateFlow<Float> = _logoNormalizedY.asStateFlow()
+
+    private val _logoScale = MutableStateFlow(0.18f)
+    val logoScale: StateFlow<Float> = _logoScale.asStateFlow()
+
+    private val _isLogoSelectedOnPreview = MutableStateFlow(false)
+    val isLogoSelectedOnPreview: StateFlow<Boolean> = _isLogoSelectedOnPreview.asStateFlow()
 
     private val _zipWarningMessage = MutableStateFlow<String?>(null)
     val zipWarningMessage: StateFlow<String?> = _zipWarningMessage.asStateFlow()
@@ -160,6 +207,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         TransitionSoundEngine.init(application)
+        CtaVideoEngine.init(application)
         viewModelScope.launch {
             TransitionSoundEngine.customSounds.collect { customList ->
                 _allAvailableSounds.value = TransitionSoundEffect.BUILT_IN_SOUNDS + customList
@@ -265,8 +313,185 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _activeResourcePanel.value = panel
     }
 
-    fun closeResourcePanel() {
+    fun closeResourcePanel(): Boolean {
+        if (_activeResourcePanel.value == ResourcePanelTab.CTA_VIDEOS && _selectedCta.value.id != 0) {
+            val parsedTime = parseCtaStartTimeSeconds(_ctaStartTimeText.value)
+            if (parsedTime == null) {
+                val errMsg = "Informe o tempo exato em que a CTA deve ser exibida no vídeo final antes de voltar!"
+                _ctaTimeErrorMessage.value = errMsg
+                showFiveSecondValidationError("Informe o tempo da CTA")
+                return false
+            }
+        }
+        _ctaTimeErrorMessage.value = null
         _activeResourcePanel.value = null
+        return true
+    }
+
+    fun selectCta(cta: CtaVideoItem) {
+        _selectedCta.value = cta
+        if (cta.id == 0) {
+            _ctaTimeErrorMessage.value = null
+            _isCtaSelectedOnPreview.value = false
+        } else {
+            _isCtaSelectedOnPreview.value = true
+            _isLogoSelectedOnPreview.value = false
+            _isTestPlaying.value = true
+        }
+    }
+
+    fun updateCtaStartTimeText(newText: String) {
+        _ctaStartTimeText.value = newText
+        _ctaTimeErrorMessage.value = null
+    }
+
+    fun parseCtaStartTimeSeconds(rawText: String): Float? {
+        val cleaned = rawText.trim().lowercase().removeSuffix("s").removeSuffix("seg").trim()
+        if (cleaned.isEmpty()) return null
+        if (cleaned.contains(":")) {
+            val parts = cleaned.split(":")
+            if (parts.size == 2) {
+                val minutes = parts[0].trim().toIntOrNull() ?: return null
+                val seconds = parts[1].trim().replace(",", ".").toFloatOrNull() ?: return null
+                if (minutes < 0 || seconds < 0f) return null
+                return minutes * 60f + seconds
+            }
+            return null
+        }
+        val value = cleaned.replace(",", ".").toFloatOrNull() ?: return null
+        return if (value >= 0f) value else null
+    }
+
+    fun uploadCustomCtaVideo(uri: Uri) {
+        viewModelScope.launch {
+            when (val result = CtaVideoEngine.importCustomCtaVideo(getApplication(), uri)) {
+                is CtaImportResult.Success -> {
+                    val newCta = result.ctaItem
+                    _selectedCta.value = newCta
+                    _isCtaSelectedOnPreview.value = true
+                    _isLogoSelectedOnPreview.value = false
+                    _isTestPlaying.value = true
+                    _ctaTimeErrorMessage.value = null
+                    _messageEvents.emit("CTA '${newCta.fileName}' carregada com fundo sólido removido automaticamente!")
+                }
+                is CtaImportResult.Error -> {
+                    val msg = result.message.ifBlank { "Carregue CTA com fundo sólido" }
+                    _ctaTimeErrorMessage.value = msg
+                    showFiveSecondValidationError("Carregue CTA com fundo sólido")
+                    _messageEvents.emit(msg)
+                }
+            }
+        }
+    }
+
+    fun deleteCtaVideo(ctaId: Int) {
+        viewModelScope.launch {
+            val deleted = CtaVideoEngine.deleteCtaVideo(getApplication(), ctaId)
+            if (deleted) {
+                if (_selectedCta.value.id == ctaId) {
+                    _selectedCta.value = CtaVideoItem.NONE
+                    _ctaTimeErrorMessage.value = null
+                    _isCtaSelectedOnPreview.value = false
+                }
+                _messageEvents.emit("CTA excluída com sucesso.")
+            }
+        }
+    }
+
+    fun updateCtaPosition(normX: Float, normY: Float) {
+        _ctaNormalizedX.value = normX.coerceIn(0.08f, 0.92f)
+        _ctaNormalizedY.value = normY.coerceIn(0.08f, 0.92f)
+    }
+
+    fun updateCtaScale(newScale: Float) {
+        _ctaScale.value = newScale.coerceIn(0.16f, 0.85f)
+    }
+
+    fun selectCtaOnPreview() {
+        _isCtaSelectedOnPreview.value = true
+        _isLogoSelectedOnPreview.value = false
+    }
+
+    // Funções de LOGO (se já houver um logo na tela, clicar no botão LOGO não faz nada)
+    fun onLogoButtonClick() {
+        if (!_logoFilePath.value.isNullOrBlank()) {
+            // Requisito: "SE O USUÁRIO CLICAR NO BOTÃO LOGO ENQUANTO HÁ UM LOGO NA TELA NADA ACONTECE."
+            return
+        }
+        _isLogoGalleryOpen.value = true
+    }
+
+    fun closeLogoGallery() {
+        _isLogoGalleryOpen.value = false
+    }
+
+    fun selectLogoFromGallery(context: Context, uri: Uri) {
+        if (!_logoFilePath.value.isNullOrBlank()) {
+            _isLogoGalleryOpen.value = false
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val logosDir = File(context.filesDir, "project_logos").apply { mkdirs() }
+                val destFile = File(logosDir, "logo_${System.currentTimeMillis()}.png")
+                val copied = context.contentResolver.openInputStream(uri)?.use { input ->
+                    destFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                    true
+                } ?: false
+
+                if (!copied || !destFile.exists() || destFile.length() == 0L) {
+                    _messageEvents.emit("Não foi possível carregar a imagem de Logo.")
+                    return@launch
+                }
+
+                // Verifica se é realmente uma imagem válida
+                val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(destFile.absolutePath, opts)
+                if (opts.outWidth <= 0 || opts.outHeight <= 0) {
+                    destFile.delete()
+                    showFiveSecondValidationError("Selecione apenas imagem de Logo")
+                    return@launch
+                }
+
+                _logoFilePath.value = destFile.absolutePath
+                _isLogoSelectedOnPreview.value = true
+                _isCtaSelectedOnPreview.value = false
+                _isLogoGalleryOpen.value = false
+                _messageEvents.emit("Logo adicionado! Toque nele na pré-visualização para ajustar tamanho ou posição.")
+            } catch (e: Exception) {
+                _messageEvents.emit("Erro ao carregar imagem de Logo: ${e.message}")
+            }
+        }
+    }
+
+    fun removeLogo() {
+        val currentPath = _logoFilePath.value
+        _logoFilePath.value = null
+        _isLogoSelectedOnPreview.value = false
+        if (!currentPath.isNullOrBlank()) {
+            try {
+                File(currentPath).delete()
+            } catch (_: Exception) {}
+        }
+        viewModelScope.launch {
+            _messageEvents.emit("Logo removido da tela de pré-visualização.")
+        }
+    }
+
+    fun updateLogoPosition(normX: Float, normY: Float) {
+        _logoNormalizedX.value = normX.coerceIn(0.05f, 0.95f)
+        _logoNormalizedY.value = normY.coerceIn(0.05f, 0.95f)
+    }
+
+    fun updateLogoScale(newScale: Float) {
+        _logoScale.value = newScale.coerceIn(0.08f, 0.65f)
+    }
+
+    fun selectLogoOnPreview() {
+        _isLogoSelectedOnPreview.value = true
+        _isCtaSelectedOnPreview.value = false
     }
 
     private fun showFiveSecondValidationError(shortMessage: String) {
@@ -670,6 +895,23 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
         val configs = (parseResult as SyntaxParseResult.Success).configs
 
+        // 4. Valida o tempo obrigatório de CTA caso alguma CTA esteja selecionada
+        val currentCta = _selectedCta.value
+        val ctaStartSec: Float = if (currentCta.id != 0) {
+            val parsedCtaTime = parseCtaStartTimeSeconds(_ctaStartTimeText.value)
+            if (parsedCtaTime == null) {
+                val errMsg = "Informe o tempo exato em que a CTA deve ser exibida no vídeo final!"
+                _ctaTimeErrorMessage.value = errMsg
+                showFiveSecondValidationError("Informe o tempo da CTA")
+                _isMasterConfigOpen.value = false
+                _activeResourcePanel.value = ResourcePanelTab.CTA_VIDEOS
+                return false
+            }
+            parsedCtaTime
+        } else {
+            -1f
+        }
+
         val resolution = _selectedResolution.value
         val aspectRatio = _selectedAspectRatio.value
         val (finalWidth, finalHeight) = aspectRatio.calculateDimensions(resolution)
@@ -695,7 +937,16 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             resolutionLabel = "${resolution.label} • ${aspectRatio.label} (${finalWidth}x${finalHeight})",
             transitionIds = transitionIds,
             transitionSoundIds = transitionSoundIds,
-            transitionDurationSeconds = transitionDuration
+            transitionDurationSeconds = transitionDuration,
+            ctaId = currentCta.id,
+            ctaStartTimeSeconds = ctaStartSec,
+            ctaNormX = _ctaNormalizedX.value,
+            ctaNormY = _ctaNormalizedY.value,
+            ctaScale = _ctaScale.value,
+            logoFilePath = _logoFilePath.value,
+            logoNormX = _logoNormalizedX.value,
+            logoNormY = _logoNormalizedY.value,
+            logoScale = _logoScale.value
         )
         return true
     }

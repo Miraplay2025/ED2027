@@ -14,6 +14,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
+import com.example.data.model.CtaVideoItem
 import com.example.data.model.MovementEffect
 import com.example.data.model.TransitionEffect
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +30,22 @@ data class RenderSequenceItem(
     val transitionSoundIdToNext: Int = 0
 )
 
+data class CtaRenderOverlayConfig(
+    val ctaItem: CtaVideoItem,
+    val startTimeSeconds: Float,
+    val normalizedX: Float = 0.50f,
+    val normalizedY: Float = 0.78f,
+    val scale: Float = 0.38f,
+    val durationSeconds: Float = 3.5f
+)
+
+data class LogoRenderOverlayConfig(
+    val logoFile: File,
+    val normalizedX: Float = 0.82f,
+    val normalizedY: Float = 0.16f,
+    val scale: Float = 0.22f
+)
+
 object VideoEncoder {
 
     private const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_AVC // H.264
@@ -40,7 +57,7 @@ object VideoEncoder {
      * Renderização de Vídeo Único (Exportação Unificada):
      * Processa a sequência completa de imagens e exporta um ÚNICO VÍDEO COMPLETO final,
      * unindo todas as imagens com suas durações, movimentos de câmera e transições suaves,
-     * emitindo o progresso global de 0% a 100%.
+     * além das sobreposições opcionais de CTA (no tempo exato configurado) e Logo (do início ao fim).
      */
     suspend fun encodeUnifiedSequenceToVideo(
         sequence: List<RenderSequenceItem>,
@@ -50,6 +67,8 @@ object VideoEncoder {
         frameRate: Int = DEFAULT_FRAME_RATE,
         bitRate: Int = DEFAULT_BIT_RATE,
         transitionDurationSeconds: Float = 1.0f,
+        ctaOverlay: CtaRenderOverlayConfig? = null,
+        logoOverlay: LogoRenderOverlayConfig? = null,
         onGlobalProgress: (currentFrame: Int, totalFrames: Int, currentImageIndex: Int, statusText: String) -> Unit = { _, _, _, _ -> },
         isCancelled: () -> Boolean = { false }
     ): Boolean = withContext(Dispatchers.Default) {
@@ -58,6 +77,49 @@ object VideoEncoder {
         // 1. Calcula frames por imagem, frames de transição e duração visível contínua de cada cena
         val itemFrames = sequence.map { (it.durationSeconds * frameRate).toInt().coerceAtLeast(frameRate) }
         val totalGlobalFrames = itemFrames.sum().coerceAtLeast(1)
+        val totalVideoDurationSeconds = totalGlobalFrames.toFloat() / frameRate.coerceAtLeast(1)
+
+        // Prepara os quadros sem fundo (Chroma Key removido) do vídeo de CTA caso o tempo fornecido não ultrapasse o tempo do vídeo final
+        val isCtaIncluded = ctaOverlay != null &&
+            ctaOverlay.ctaItem.id != 0 &&
+            ctaOverlay.startTimeSeconds >= 0f &&
+            ctaOverlay.startTimeSeconds < totalVideoDurationSeconds
+        val ctaStartFrame = if (isCtaIncluded && ctaOverlay != null) {
+            (ctaOverlay.startTimeSeconds * frameRate).toInt().coerceAtLeast(0)
+        } else -1
+        val ctaDurationFrames = if (isCtaIncluded && ctaOverlay != null) {
+            (ctaOverlay.durationSeconds * frameRate).toInt().coerceAtLeast(frameRate)
+        } else 0
+        val ctaW = if (isCtaIncluded && ctaOverlay != null) {
+            (targetWidth * ctaOverlay.scale.coerceIn(0.16f, 0.85f)).toInt().coerceAtLeast(64)
+        } else 0
+        val ctaH = if (isCtaIncluded) {
+            (ctaW * (200f / 360f)).toInt().coerceAtLeast(38)
+        } else 0
+        val ctaTransparentFrames: List<Bitmap> = if (isCtaIncluded && ctaOverlay != null) {
+            CtaVideoEngine.getTransparentFramesForCta(ctaOverlay.ctaItem, ctaW, ctaH, 12)
+        } else emptyList()
+
+        // Prepara a imagem de Logo (exibida durante todo o vídeo do início ao fim na posição e tamanho ajustados)
+        val scaledLogoBitmap: Bitmap? = if (logoOverlay != null && logoOverlay.logoFile.exists()) {
+            val rawLogo = loadOptimizedBitmap(logoOverlay.logoFile, targetWidth, targetHeight)
+            if (rawLogo != null) {
+                val targetLogoMaxDim = (targetWidth * logoOverlay.scale.coerceIn(0.08f, 0.65f)).toInt().coerceAtLeast(32)
+                val aspect = rawLogo.width.toFloat() / rawLogo.height.coerceAtLeast(1).toFloat()
+                val lw: Int
+                val lh: Int
+                if (aspect >= 1f) {
+                    lw = targetLogoMaxDim
+                    lh = (targetLogoMaxDim / aspect).toInt().coerceAtLeast(16)
+                } else {
+                    lh = targetLogoMaxDim
+                    lw = (targetLogoMaxDim * aspect).toInt().coerceAtLeast(16)
+                }
+                Bitmap.createScaledBitmap(rawLogo, lw, lh, true).also {
+                    if (it != rawLogo) rawLogo.recycle()
+                }
+            } else null
+        } else null
 
         // Calcula os frames de transição de saída de cada cena (0 até sequence.size - 2)
         val outTransFrames = IntArray(sequence.size) { idx ->
@@ -165,8 +227,35 @@ object VideoEncoder {
                 }
             }
 
-            // Helper para enviar um frame YUV ao encoder
+            // Helper para enviar um frame YUV ao encoder (aplicando antes o Logo contínuo e o vídeo de CTA no tempo definido)
             fun queueCurrentFrame(isLastFrame: Boolean): Boolean {
+                // 1. Logo: aparece durante todo o vídeo do início ao fim na posição e tamanho ajustados pelo usuário
+                if (scaledLogoBitmap != null && !scaledLogoBitmap.isRecycled && logoOverlay != null) {
+                    val logoLeft = (logoOverlay.normalizedX.coerceIn(0.05f, 0.95f) * targetWidth - scaledLogoBitmap.width / 2f)
+                        .coerceIn(0f, (targetWidth - scaledLogoBitmap.width).coerceAtLeast(0).toFloat())
+                    val logoTop = (logoOverlay.normalizedY.coerceIn(0.05f, 0.95f) * targetHeight - scaledLogoBitmap.height / 2f)
+                        .coerceIn(0f, (targetHeight - scaledLogoBitmap.height).coerceAtLeast(0).toFloat())
+                    paint.alpha = 255
+                    canvas.drawBitmap(scaledLogoBitmap, logoLeft, logoTop, paint)
+                }
+
+                // 2. CTA: aparece no tempo exato definido pelo usuário (se não ultrapassar o tempo do vídeo final)
+                // na posição e tamanho ajustados pelo usuário, sem fundo (Chroma Key removido)
+                if (isCtaIncluded && ctaOverlay != null && ctaTransparentFrames.isNotEmpty() &&
+                    globalFrameIndex >= ctaStartFrame && globalFrameIndex < (ctaStartFrame + ctaDurationFrames)
+                ) {
+                    val ctaElapsedFrames = (globalFrameIndex - ctaStartFrame).coerceAtLeast(0)
+                    val ctaFrameBitmap = ctaTransparentFrames[ctaElapsedFrames % ctaTransparentFrames.size]
+                    if (!ctaFrameBitmap.isRecycled) {
+                        val ctaLeft = (ctaOverlay.normalizedX.coerceIn(0.08f, 0.92f) * targetWidth - ctaFrameBitmap.width / 2f)
+                            .coerceIn(0f, (targetWidth - ctaFrameBitmap.width).coerceAtLeast(0).toFloat())
+                        val ctaTop = (ctaOverlay.normalizedY.coerceIn(0.08f, 0.92f) * targetHeight - ctaFrameBitmap.height / 2f)
+                            .coerceIn(0f, (targetHeight - ctaFrameBitmap.height).coerceAtLeast(0).toFloat())
+                        paint.alpha = 255
+                        canvas.drawBitmap(ctaFrameBitmap, ctaLeft, ctaTop, paint)
+                    }
+                }
+
                 frameBitmap.getPixels(argbArray, 0, targetWidth, 0, 0, targetWidth, targetHeight)
                 if (colorFormat == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar) {
                     convertArgbToYuv420Planar(argbArray, yuvArray, targetWidth, targetHeight)

@@ -104,37 +104,58 @@ data class GalleryMediaItem(
 fun AppMediaGalleryDialog(
     isOpen: Boolean,
     onDismiss: () -> Unit,
-    onConfirmSelection: (List<Uri>) -> Unit
+    onConfirmSelection: (List<Uri>) -> Unit,
+    imagesOnly: Boolean = false,
+    singleSelection: Boolean = false,
+    dialogTitle: String = "Galeria Exclusiva do App",
+    dialogSubtitle: String = "Apenas mídias de imagens e vídeos para o projeto"
 ) {
     if (!isOpen) return
 
     val context = LocalContext.current
     var allMediaItems by remember { mutableStateOf<List<GalleryMediaItem>>(emptyList()) }
     val selectedUris = remember { mutableStateListOf<Uri>() }
-    var filterTab by remember { mutableIntStateOf(0) } // 0 = Todas, 1 = Imagens, 2 = Vídeos
+    var filterTab by remember { mutableIntStateOf(if (imagesOnly) 1 else 0) } // 0 = Todas, 1 = Imagens, 2 = Vídeos
 
-    // Seletor nativo Android Photo Picker restrito estritamente a Imagens e Vídeos
+    // Seletor nativo Android Photo Picker restrito estritamente a Imagens (modo Logo) ou Imagens e Vídeos
     val visualMediaPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
-            onConfirmSelection(uris)
+            onConfirmSelection(if (singleSelection) listOf(uris.first()) else uris)
             onDismiss()
         }
     }
 
-    LaunchedEffect(isOpen) {
-        if (isOpen) {
-            selectedUris.clear()
-            allMediaItems = loadDeviceImagesAndVideos(context)
+    val singleImagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onConfirmSelection(listOf(uri))
+            onDismiss()
         }
     }
 
-    val filteredItems = remember(allMediaItems, filterTab) {
-        when (filterTab) {
-            1 -> allMediaItems.filter { !it.isVideo }
-            2 -> allMediaItems.filter { it.isVideo }
-            else -> allMediaItems
+    LaunchedEffect(isOpen, imagesOnly) {
+        if (isOpen) {
+            selectedUris.clear()
+            val loaded = loadDeviceImagesAndVideos(context)
+            allMediaItems = if (imagesOnly) loaded.filter { !it.isVideo } else loaded
+            if (imagesOnly) {
+                filterTab = 1
+            }
+        }
+    }
+
+    val filteredItems = remember(allMediaItems, filterTab, imagesOnly) {
+        if (imagesOnly) {
+            allMediaItems.filter { !it.isVideo }
+        } else {
+            when (filterTab) {
+                1 -> allMediaItems.filter { !it.isVideo }
+                2 -> allMediaItems.filter { it.isVideo }
+                else -> allMediaItems
+            }
         }
     }
 
@@ -151,7 +172,7 @@ fun AppMediaGalleryDialog(
                 .fillMaxWidth(0.96f)
                 .fillMaxHeight(0.90f)
                 .clip(RoundedCornerShape(24.dp))
-                .testTag("app_exclusive_media_gallery_dialog"),
+                .testTag(if (imagesOnly) "app_logo_gallery_dialog" else "app_exclusive_media_gallery_dialog"),
             color = Color(0xFF141722),
             border = BorderStroke(1.5.dp, Color(0xFF2E354B)),
             shadowElevation = 16.dp
@@ -188,13 +209,13 @@ fun AppMediaGalleryDialog(
 
                         Column {
                             Text(
-                                text = "Galeria Exclusiva do App",
+                                text = dialogTitle,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
                             Text(
-                                text = "Apenas mídias de imagens e vídeos para o projeto",
+                                text = dialogSubtitle,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color(0xFF94A3B8)
                             )
@@ -222,40 +243,55 @@ fun AppMediaGalleryDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(
-                            selected = filterTab == 0,
-                            onClick = { filterTab = 0 },
-                            label = { Text("Todas (${allMediaItems.size})", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFF00E5FF).copy(alpha = 0.2f),
-                                selectedLabelColor = Color(0xFF00E5FF)
+                        if (!imagesOnly) {
+                            FilterChip(
+                                selected = filterTab == 0,
+                                onClick = { filterTab = 0 },
+                                label = { Text("Todas (${allMediaItems.size})", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFF00E5FF).copy(alpha = 0.2f),
+                                    selectedLabelColor = Color(0xFF00E5FF)
+                                )
                             )
-                        )
+                        }
                         FilterChip(
-                            selected = filterTab == 1,
+                            selected = filterTab == 1 || imagesOnly,
                             onClick = { filterTab = 1 },
-                            label = { Text("Imagens", fontSize = 11.sp) },
+                            label = {
+                                Text(
+                                    if (imagesOnly) "Apenas Imagens (${filteredItems.size})" else "Imagens",
+                                    fontSize = 11.sp
+                                )
+                            },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = Color(0xFF00E5FF).copy(alpha = 0.2f),
                                 selectedLabelColor = Color(0xFF00E5FF)
                             )
                         )
-                        FilterChip(
-                            selected = filterTab == 2,
-                            onClick = { filterTab = 2 },
-                            label = { Text("Vídeos", fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFF00E5FF).copy(alpha = 0.2f),
-                                selectedLabelColor = Color(0xFF00E5FF)
+                        if (!imagesOnly) {
+                            FilterChip(
+                                selected = filterTab == 2,
+                                onClick = { filterTab = 2 },
+                                label = { Text("Vídeos", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFF00E5FF).copy(alpha = 0.2f),
+                                    selectedLabelColor = Color(0xFF00E5FF)
+                                )
                             )
-                        )
+                        }
                     }
 
                     OutlinedButton(
                         onClick = {
-                            visualMediaPickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                            )
+                            if (imagesOnly || singleSelection) {
+                                singleImagePickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            } else {
+                                visualMediaPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                                )
+                            }
                         },
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
@@ -268,7 +304,11 @@ fun AppMediaGalleryDialog(
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Mais Mídias", fontSize = 10.sp, color = Color(0xFF00E5FF))
+                        Text(
+                            if (imagesOnly) "Mais Imagens" else "Mais Mídias",
+                            fontSize = 10.sp,
+                            color = Color(0xFF00E5FF)
+                        )
                     }
                 }
 
@@ -310,10 +350,15 @@ fun AppMediaGalleryDialog(
                                     isSelected = isSelected,
                                     selectionOrder = selectionOrder,
                                     onClick = {
-                                        if (isSelected) {
-                                            selectedUris.remove(item.uri)
-                                        } else {
+                                        if (singleSelection) {
+                                            selectedUris.clear()
                                             selectedUris.add(item.uri)
+                                        } else {
+                                            if (isSelected) {
+                                                selectedUris.remove(item.uri)
+                                            } else {
+                                                selectedUris.add(item.uri)
+                                            }
                                         }
                                     }
                                 )

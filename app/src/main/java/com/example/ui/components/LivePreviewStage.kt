@@ -12,11 +12,15 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import com.example.data.model.CtaVideoItem
+import com.example.engine.CtaVideoEngine
 import com.example.engine.MediaHelper
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,15 +41,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.ZoomOutMap
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalIconButton
@@ -54,6 +68,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,6 +77,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,12 +85,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -83,8 +105,10 @@ import com.example.data.model.MovementEffect
 import com.example.data.model.ProjectImage
 import com.example.data.model.TransitionEffect
 import com.example.data.model.VideoAspectRatio
+import kotlinx.coroutines.delay
 import java.io.File
 import kotlin.math.PI
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
@@ -109,9 +133,43 @@ fun LivePreviewStage(
     isPlaying: Boolean,
     onTogglePlay: () -> Unit,
     transitionDurationSeconds: Float = 1.0f,
+    selectedCta: CtaVideoItem = CtaVideoItem.NO_CTA,
+    ctaNormalizedX: Float = 0.50f,
+    ctaNormalizedY: Float = 0.78f,
+    ctaScale: Float = 0.38f,
+    onCtaPositionChange: (Float, Float) -> Unit = { _, _ -> },
+    onCtaScaleChange: (Float) -> Unit = {},
+    logoImagePath: String? = null,
+    logoNormalizedX: Float = 0.82f,
+    logoNormalizedY: Float = 0.16f,
+    logoScale: Float = 0.22f,
+    onLogoPositionChange: (Float, Float) -> Unit = { _, _ -> },
+    onLogoScaleChange: (Float) -> Unit = {},
+    onRemoveLogo: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val animProgress = remember { Animatable(0f) }
+    var stageSize by remember { mutableStateOf(IntSize.Zero) }
+    var activeOverlayElement by remember { mutableStateOf<String?>(null) } // "CTA" ou "LOGO"
+    var showConfirmDeleteLogoDialog by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+
+    // Reprodução automática e contínua dos quadros do vídeo de CTA selecionado (sem fundo / Chroma Key removido)
+    val ctaFrames = remember(selectedCta.id, selectedCta.filePath) {
+        if (selectedCta.id == 0) emptyList()
+        else CtaVideoEngine.getTransparentFramesForCta(selectedCta, targetWidth = 360, targetHeight = 200, frameCount = 10)
+    }
+    var ctaFrameIndex by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(selectedCta.id, ctaFrames.size) {
+        ctaFrameIndex = 0
+        if (selectedCta.id != 0 && ctaFrames.size > 1) {
+            while (true) {
+                delay(140L)
+                ctaFrameIndex = (ctaFrameIndex + 1) % ctaFrames.size
+            }
+        }
+    }
 
     // Duração do percurso completo do início ao fim
     val animationDuration = if (isPreviewingTransition) {
@@ -344,7 +402,14 @@ fun LivePreviewStage(
                             .fillMaxSize()
                             .padding(6.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color.Black),
+                            .background(Color.Black)
+                            .onSizeChanged { stageSize = it }
+                            .clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                activeOverlayElement = null
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         if (currentImage != null) {
@@ -394,31 +459,232 @@ fun LivePreviewStage(
                                 }
                             }
                         } else {
-                        // Estado sem imagem
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Image,
-                                contentDescription = null,
-                                tint = Color.Gray,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Nenhuma imagem importada",
-                                color = Color.LightGray,
-                                fontSize = 13.sp
-                            )
-                            Text(
-                                text = "Adicione imagens abaixo para começar",
-                                color = Color.Gray,
-                                fontSize = 11.sp
-                            )
+                            // Estado sem imagem
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Image,
+                                    contentDescription = null,
+                                    tint = Color.Gray,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Nenhuma imagem importada",
+                                    color = Color.LightGray,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = "Adicione imagens abaixo para começar",
+                                    color = Color.Gray,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        // =========================================================================
+                        // CAMADA INTERATIVA 1: VÍDEO DE CTA (REPRODUÇÃO AUTOMÁTICA SEM FUNDO + ARRASTAR E REDIMENSIONAR)
+                        // =========================================================================
+                        if (selectedCta.id != 0 && ctaFrames.isNotEmpty()) {
+                            val stageW = stageSize.width.coerceAtLeast(240).toFloat()
+                            val stageH = stageSize.height.coerceAtLeast(160).toFloat()
+                            val ctaBoxW = (stageW * ctaScale.coerceIn(0.16f, 0.85f)).coerceAtLeast(64f)
+                            val ctaBoxH = (ctaBoxW * (200f / 360f)).coerceAtLeast(38f)
+                            val ctaLeftPx = (ctaNormalizedX * stageW - ctaBoxW / 2f).coerceIn(0f, (stageW - ctaBoxW).coerceAtLeast(0f))
+                            val ctaTopPx = (ctaNormalizedY * stageH - ctaBoxH / 2f).coerceIn(0f, (stageH - ctaBoxH).coerceAtLeast(0f))
+                            val isCtaSelected = activeOverlayElement == "CTA"
+
+                            val currentCtaX by rememberUpdatedState(ctaNormalizedX)
+                            val currentCtaY by rememberUpdatedState(ctaNormalizedY)
+                            val currentCtaScale by rememberUpdatedState(ctaScale)
+                            val currentStageW by rememberUpdatedState(stageW)
+                            val currentStageH by rememberUpdatedState(stageH)
+
+                            val ctaWdp = with(density) { ctaBoxW.toDp() }
+                            val ctaHdp = with(density) { ctaBoxH.toDp() }
+                            val activeCtaBitmap = ctaFrames[ctaFrameIndex % ctaFrames.size]
+
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .offset { IntOffset(ctaLeftPx.roundToInt(), ctaTopPx.roundToInt()) }
+                                    .size(width = ctaWdp, height = ctaHdp)
+                                    .then(
+                                        if (isCtaSelected) {
+                                            Modifier.border(
+                                                BorderStroke(1.8.dp, Color(0xFF00E5FF)),
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                        } else Modifier
+                                    )
+                                    .clickable {
+                                        activeOverlayElement = "CTA"
+                                    }
+                                    .pointerInput(selectedCta.id) {
+                                        detectDragGestures(
+                                            onDragStart = { activeOverlayElement = "CTA" },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val newX = (currentCtaX + dragAmount.x / currentStageW).coerceIn(0.08f, 0.92f)
+                                                val newY = (currentCtaY + dragAmount.y / currentStageH).coerceIn(0.08f, 0.92f)
+                                                onCtaPositionChange(newX, newY)
+                                            }
+                                        )
+                                    }
+                                    .testTag("preview_cta_overlay")
+                            ) {
+                                if (!activeCtaBitmap.isRecycled) {
+                                    Image(
+                                        bitmap = activeCtaBitmap.asImageBitmap(),
+                                        contentDescription = "CTA ${selectedCta.fileName}",
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+
+                                // Alça de redimensionamento quando o usuário clica no CTA na tela de pré-visualização
+                                if (isCtaSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .size(22.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF00E5FF))
+                                            .border(1.dp, Color.Black, CircleShape)
+                                            .pointerInput(Unit) {
+                                                detectDragGestures { change, dragAmount ->
+                                                    change.consume()
+                                                    val deltaScale = (dragAmount.x + dragAmount.y) / currentStageW
+                                                    onCtaScaleChange((currentCtaScale + deltaScale).coerceIn(0.16f, 0.85f))
+                                                }
+                                            }
+                                            .testTag("cta_resize_handle"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ZoomOutMap,
+                                            contentDescription = "Redimensionar CTA",
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // =========================================================================
+                        // CAMADA INTERATIVA 2: IMAGEM DE LOGO (ARRASTAR, REDIMENSIONAR E BOTÃO X COM CONFIRMAÇÃO)
+                        // =========================================================================
+                        if (logoImagePath != null) {
+                            val stageW = stageSize.width.coerceAtLeast(240).toFloat()
+                            val stageH = stageSize.height.coerceAtLeast(160).toFloat()
+                            val logoBoxSizePx = (stageW * logoScale.coerceIn(0.08f, 0.65f)).coerceAtLeast(44f)
+                            val logoLeftPx = (logoNormalizedX * stageW - logoBoxSizePx / 2f).coerceIn(0f, (stageW - logoBoxSizePx).coerceAtLeast(0f))
+                            val logoTopPx = (logoNormalizedY * stageH - logoBoxSizePx / 2f).coerceIn(0f, (stageH - logoBoxSizePx).coerceAtLeast(0f))
+                            val isLogoSelected = activeOverlayElement == "LOGO"
+
+                            val currentLogoX by rememberUpdatedState(logoNormalizedX)
+                            val currentLogoY by rememberUpdatedState(logoNormalizedY)
+                            val currentLogoScale by rememberUpdatedState(logoScale)
+                            val currentStageW by rememberUpdatedState(stageW)
+                            val currentStageH by rememberUpdatedState(stageH)
+
+                            val logoSizeDp = with(density) { logoBoxSizePx.toDp() }
+
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .offset { IntOffset(logoLeftPx.roundToInt(), logoTopPx.roundToInt()) }
+                                    .size(logoSizeDp)
+                                    .then(
+                                        if (isLogoSelected) {
+                                            Modifier.border(
+                                                BorderStroke(1.8.dp, Color(0xFFFFD54F)),
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                        } else Modifier
+                                    )
+                                    .clickable {
+                                        activeOverlayElement = "LOGO"
+                                    }
+                                    .pointerInput(logoImagePath) {
+                                        detectDragGestures(
+                                            onDragStart = { activeOverlayElement = "LOGO" },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val newX = (currentLogoX + dragAmount.x / currentStageW).coerceIn(0.06f, 0.94f)
+                                                val newY = (currentLogoY + dragAmount.y / currentStageH).coerceIn(0.06f, 0.94f)
+                                                onLogoPositionChange(newX, newY)
+                                            }
+                                        )
+                                    }
+                                    .testTag("preview_logo_overlay")
+                            ) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(File(logoImagePath))
+                                        .build(),
+                                    contentDescription = "Logo do Vídeo",
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(4.dp)
+                                )
+
+                                // Botão X na imagem de Logo: ao clicar exibe mensagem para confirmar exclusão
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(22.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFD32F2F))
+                                        .border(1.dp, Color.White, CircleShape)
+                                        .clickable {
+                                            showConfirmDeleteLogoDialog = true
+                                        }
+                                        .testTag("logo_overlay_delete_button"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Remover Logo",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+
+                                // Alça de redimensionamento quando o usuário clica no Logo na tela de pré-visualização
+                                if (isLogoSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .size(22.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFFFD54F))
+                                            .border(1.dp, Color.Black, CircleShape)
+                                            .pointerInput(Unit) {
+                                                detectDragGestures { change, dragAmount ->
+                                                    change.consume()
+                                                    val deltaScale = (dragAmount.x + dragAmount.y) / currentStageW
+                                                    onLogoScaleChange((currentLogoScale + deltaScale).coerceIn(0.08f, 0.65f))
+                                                }
+                                            }
+                                            .testTag("logo_resize_handle"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ZoomOutMap,
+                                            contentDescription = "Redimensionar Logo",
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
-                }
 
                 // Seta de Navegação para a Esquerda (Voltar)
                 // REGRA 6: Oculta automaticamente quando a tela voltar para a primeira imagem (IMAGEM 1)
@@ -550,8 +816,150 @@ fun LivePreviewStage(
                 }
             }
         }
+
+        // Controles rápidos de tamanho quando o usuário clica no CTA ou no LOGO na tela de pré-visualização
+        AnimatedVisibility(
+            visible = (activeOverlayElement == "CTA" && selectedCta.id != 0) ||
+                (activeOverlayElement == "LOGO" && logoImagePath != null)
+        ) {
+            val isEditingCta = activeOverlayElement == "CTA" && selectedCta.id != 0
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF161A26),
+                border = BorderStroke(1.dp, if (isEditingCta) Color(0xFF00E5FF) else Color(0xFFFFD54F)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .testTag("overlay_transform_controls_bar")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.OpenWith,
+                            contentDescription = null,
+                            tint = if (isEditingCta) Color(0xFF00E5FF) else Color(0xFFFFD54F),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isEditingCta)
+                                "Ajustar ${selectedCta.fileName} (Arraste na tela)"
+                            else
+                                "Ajustar LOGO (Arraste na tela)",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilledTonalIconButton(
+                            onClick = {
+                                if (isEditingCta) {
+                                    onCtaScaleChange((ctaScale - 0.05f).coerceIn(0.16f, 0.85f))
+                                } else {
+                                    onLogoScaleChange((logoScale - 0.04f).coerceIn(0.08f, 0.65f))
+                                }
+                            },
+                            modifier = Modifier
+                                .size(30.dp)
+                                .testTag("btn_decrease_overlay_size")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Remove,
+                                contentDescription = "Diminuir Tamanho",
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+
+                        Text(
+                            text = if (isEditingCta) "${(ctaScale * 100).toInt()}%" else "${(logoScale * 100).toInt()}%",
+                            color = if (isEditingCta) Color(0xFF00E5FF) else Color(0xFFFFD54F),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+
+                        FilledTonalIconButton(
+                            onClick = {
+                                if (isEditingCta) {
+                                    onCtaScaleChange((ctaScale + 0.05f).coerceIn(0.16f, 0.85f))
+                                } else {
+                                    onLogoScaleChange((logoScale + 0.04f).coerceIn(0.08f, 0.65f))
+                                }
+                            },
+                            modifier = Modifier
+                                .size(30.dp)
+                                .testTag("btn_increase_overlay_size")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Aumentar Tamanho",
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        }
     }
-}
+
+    // Diálogo de confirmação para remover o Logo ao clicar no botão X do Logo
+    if (showConfirmDeleteLogoDialog) {
+        AlertDialog(
+            onDismissRequest = { showConfirmDeleteLogoDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text(
+                    text = "Confirmar Exclusão do Logo",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Deseja realmente excluir a imagem de Logo exibida na tela?"
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onRemoveLogo()
+                        activeOverlayElement = null
+                        showConfirmDeleteLogoDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    ),
+                    modifier = Modifier.testTag("confirm_delete_logo_button")
+                ) {
+                    Text("Confirmar Exclusão")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showConfirmDeleteLogoDialog = false },
+                    modifier = Modifier.testTag("cancel_delete_logo_button")
+                ) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
 }
 
 /**

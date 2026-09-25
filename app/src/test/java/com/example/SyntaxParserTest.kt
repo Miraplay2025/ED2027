@@ -160,5 +160,30 @@ class SyntaxParserTest {
         assertEquals(17, files4.size)
         assertTrue(files1.all { it.exists() && it.name.endsWith(".mp3") && it.length() > 100L })
     }
+
+    @Test
+    fun testCtaVideosFolderAndWebmCreation() {
+        val projectRootCtaFolder = java.io.File("../VIDEOS CTA")
+        val assetsCtaFolder = java.io.File("src/main/assets/VIDEOS CTA")
+
+        val rootFiles = com.example.engine.CtaVideoEngine.ensureFakeCtaWebmFolder(projectRootCtaFolder)
+        val assetFiles = com.example.engine.CtaVideoEngine.ensureFakeCtaWebmFolder(assetsCtaFolder)
+
+        assertEquals(10, rootFiles.size)
+        assertEquals(10, assetFiles.size)
+        assertTrue(rootFiles.any { it.name == "CTA1.WEBM" && it.exists() && it.length() > 100L })
+        assertTrue(rootFiles.any { it.name == "CTA2.WEBM" && it.exists() })
+        assertTrue(rootFiles.any { it.name == "CTA3.WEBM" && it.exists() })
+
+        // Primeiro item da lista é SEM CTA (id = 0)
+        assertEquals(0, com.example.data.model.CtaVideoItem.BUILT_IN_OPTIONS.first().id)
+        assertEquals("SEM CTA", com.example.data.model.CtaVideoItem.BUILT_IN_OPTIONS.first().name)
+
+        // Valida parser de tempo obrigatório de CTA
+        assertEquals(5.0f, com.example.engine.CtaVideoEngine.parseCtaTimeSeconds("5s") ?: -1f, 0.01f)
+        assertEquals(12.5f, com.example.engine.CtaVideoEngine.parseCtaTimeSeconds("12,5") ?: -1f, 0.01f)
+        assertEquals(65.0f, com.example.engine.CtaVideoEngine.parseCtaTimeSeconds("01:05") ?: -1f, 0.01f)
+        assertEquals(null, com.example.engine.CtaVideoEngine.parseCtaTimeSeconds(""))
+    }
 }
 

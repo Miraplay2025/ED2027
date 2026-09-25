@@ -9,7 +9,7 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * Representa as 20 Transições Suaves inspiradas no CapCut (focadas em dissolução, fumaça,
+ * Representa as 20 Transições Suaves Profissionais (focadas em dissolução, fumaça,
  * borrão, desfoque e zoom suave), além da opção 0 = Sem Transição.
  *
  * REGRAS ATENDIDAS:
@@ -144,7 +144,7 @@ data class TransitionEffect(
                 renderMultiSampleBlur(canvas, paint, bitmap1, matrix1, bitmap2, matrix2, t, cx, cy, 9f)
             }
             10 -> {
-                // 10 = Zoom Cruzado (Cross-Zoom CapCut)
+                // 10 = Zoom Cruzado (Cross-Zoom)
                 val s1 = 1.0f + 0.20f * (t * t)
                 val m1 = Matrix(matrix1).apply { postScale(s1, s1, cx, cy) }
                 paint.alpha = ((1f - t) * 255).toInt()
@@ -343,7 +343,7 @@ data class TransitionEffect(
         )
 
         /**
-         * As 20 Transições Suaves inspiradas no CapCut
+         * As 20 Transições Suaves Profissionais
          */
         val ALL_TRANSITIONS: List<TransitionEffect> = listOf(
             NO_TRANSITION,
@@ -356,7 +356,7 @@ data class TransitionEffect(
             TransitionEffect(7, "Brilho Suave", "Dissolução", "Luz translúcida suave na transição entre quadros"),
             TransitionEffect(8, "Névoa Difusa", "Fumaça / Névoa", "Névoa matinal sutil desvanecendo entre imagens"),
             TransitionEffect(9, "Desfoque Bokeh", "Borrão / Desfoque", "Efeito cinematográfico de lente fora de foco"),
-            TransitionEffect(10, "Zoom Cruzado", "Zoom Suave", "Transição icônica estilo CapCut com fusão em escala"),
+            TransitionEffect(10, "Zoom Cruzado", "Zoom Suave", "Transição icônica profissional com fusão em escala"),
             TransitionEffect(11, "Borrão Espiral Suave", "Borrão / Desfoque", "Micro-rotação com borrão circular harmonioso"),
             TransitionEffect(12, "Ondulação Suave", "Dissolução", "Pulsar sutil em onda aquática translúcida"),
             TransitionEffect(13, "Vapor Suave", "Fumaça / Névoa", "Dissolução fluida simulando vapor leve"),

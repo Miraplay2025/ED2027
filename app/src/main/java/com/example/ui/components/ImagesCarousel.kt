@@ -229,7 +229,7 @@ private fun ImageItemCard(
             .width(140.dp)
             .height(170.dp)
             .combinedClickable(
-                onClick = {},
+                onClick = onLongClick,
                 onLongClick = onLongClick
             )
             .testTag("image_item_${image.orderIndex}"),

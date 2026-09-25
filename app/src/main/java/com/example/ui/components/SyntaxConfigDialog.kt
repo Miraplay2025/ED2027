@@ -90,7 +90,7 @@ fun SyntaxConfigDialog(
                 ) {
                     Column {
                         Text(
-                            text = "Configurações via Sintaxe",
+                            text = "Animação de Câmera",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
@@ -132,7 +132,7 @@ fun SyntaxConfigDialog(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Formato exigido:\nIMAGEM X + MOVIMENTO Y + Z.Zs\nEx: IMAGEM 1 + MOVIMENTO 1 + 6.0s, IMAGEM 2 + MOVIMENTO 2 + 4.0s",
+                            text = "Formato exigido (Duração máxima 12s):\nIMAGEM X + MOVIMENTO Y + Z.Zs\nEx: IMAGEM 1 + MOVIMENTO 1 + 6.0s, IMAGEM 2 + MOVIMENTO 2 + 4.0s",
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
                             lineHeight = 16.sp,
@@ -145,7 +145,7 @@ fun SyntaxConfigDialog(
 
                 // Caixa de texto customizada com ~30vh (240dp) com placeholder que some ao digitar
                 Text(
-                    text = "Editor de Sintaxe Textual",
+                    text = "Animação de Câmera",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
@@ -221,52 +221,30 @@ fun SyntaxConfigDialog(
                                 text = errorMessage,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Botões de Ação
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                // Botão "Aleatoriamente" abaixo do campo
+                Button(
+                    onClick = onAutoGenerate,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("auto_generate_syntax_button")
                 ) {
-                    OutlinedButton(
-                        onClick = onAutoGenerate,
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("auto_generate_syntax_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AutoFixHigh,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Gerar Automático", fontSize = 12.sp)
-                    }
-
-                    Button(
-                        onClick = onSaveAndValidate,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF00E676),
-                            contentColor = Color(0xFF051B11)
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("save_syntax_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Salvar e Validar", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
-                    }
+                    Icon(
+                        imageVector = Icons.Default.AutoFixHigh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Aleatoriamente", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

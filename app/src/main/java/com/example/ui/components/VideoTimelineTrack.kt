@@ -29,16 +29,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,18 +68,19 @@ import com.example.data.model.TransitionEffect
 import java.io.File
 
 /**
- * Linha do Tempo Profissional de Vídeo estilo DaVinci / Premiere / CapCut:
+ * Linha do Tempo Profissional de Vídeo:
  * - Régua de tempo com divisões em segundos
  * - Agulha de reprodução (Playhead) sincronizada
  * - Trilha de vídeo com clipes de mídia contendo miniatura real, número da imagem e duração
  * - Marcadores de transições interativas entre cada clipe
- * - Seleção de clipe instantânea refletida na área de pré-visualização única
+ * - Ao clicar em qualquer mídia carregada, exibe confirmação para excluir e reorganizar os IDs
  */
 @Composable
 fun VideoTimelineTrack(
     images: List<ProjectImage>,
     currentImageIndex: Int,
     onSelectImage: (Int) -> Unit,
+    onDeleteImage: (Long) -> Unit = {},
     selectedMovement: MovementEffect,
     selectedTransition: TransitionEffect,
     onSelectTransition: (TransitionEffect) -> Unit,
@@ -80,36 +89,7 @@ fun VideoTimelineTrack(
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
-
-    // Animação da agulha de reprodução na régua quando em play
-    val infiniteTransition = rememberInfiniteTransition(label = "timeline_playhead")
-    val playheadOffset by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3500, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "playhead_pos"
-    )
-
-    // Cálculo do tempo estimado total (cada imagem ~6s por padrão na timeline visual)
-    val totalSeconds = (images.size * 6.0f).coerceAtLeast(6.0f)
-    val currentSeconds = ((currentImageIndex * 6.0f) + (if (isPlaying) playheadOffset * 6.0f else 0.0f))
-        .coerceIn(0.0f, totalSeconds)
-
-    val timeFormatted = String.format(
-        java.util.Locale.US,
-        "%02d:%04.1fs",
-        (currentSeconds / 60).toInt(),
-        currentSeconds % 60
-    )
-    val totalTimeFormatted = String.format(
-        java.util.Locale.US,
-        "%02d:%04.1fs",
-        (totalSeconds / 60).toInt(),
-        totalSeconds % 60
-    )
+    var mediaToDelete by remember { mutableStateOf<Pair<Int, ProjectImage>?>(null) }
 
     Card(
         modifier = modifier
@@ -126,7 +106,7 @@ fun VideoTimelineTrack(
                 .fillMaxWidth()
                 .padding(vertical = 12.dp)
         ) {
-            // Cabeçalho da Linha do Tempo: Timecode & Status
+            // Cabeçalho da Linha do Tempo: Status (sem o tempo ao lado de TRILHA V1)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -160,16 +140,6 @@ fun VideoTimelineTrack(
                             )
                         }
                     }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    Text(
-                        text = "$timeFormatted / $totalTimeFormatted",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF00E5FF)
-                    )
                 }
 
                 Surface(
@@ -177,7 +147,7 @@ fun VideoTimelineTrack(
                     color = Color(0xFF1A1D28)
                 ) {
                     Text(
-                        text = "${images.size} Clipes de Imagem",
+                        text = "${images.size} Clipes de Mídia",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color(0xFFB0B7C6),
@@ -282,12 +252,15 @@ fun VideoTimelineTrack(
                         images.forEachIndexed { index, projectImage ->
                             val isSelected = index == currentImageIndex
 
-                            // Cartão do Clipe na Linha do Tempo
+                            // Cartão do Clipe na Linha do Tempo (ao clicar seleciona e pergunta se confirma excluir a mídia)
                             TimelineClipCard(
                                 projectImage = projectImage,
                                 index = index,
                                 isSelected = isSelected,
-                                onClick = { onSelectImage(index) },
+                                onClick = {
+                                    onSelectImage(index)
+                                    mediaToDelete = Pair(index + 1, projectImage)
+                                },
                                 movementName = if (isSelected) selectedMovement.name else "Animação"
                             )
 
@@ -321,13 +294,13 @@ fun VideoTimelineTrack(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Add,
-                                    contentDescription = "Adicionar Foto",
+                                    contentDescription = "Adicionar Mídia",
                                     tint = Color(0xFF00E5FF),
                                     modifier = Modifier.size(22.dp)
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "+ Foto",
+                                    text = "+ Mídia",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF94A3B8)
@@ -338,6 +311,54 @@ fun VideoTimelineTrack(
                 }
             }
         }
+    }
+
+    // Notificação / Diálogo de confirmação para excluir a mídia carregada ao clicar nela
+    if (mediaToDelete != null) {
+        val (displayId, targetMedia) = mediaToDelete!!
+        AlertDialog(
+            onDismissRequest = { mediaToDelete = null },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text(
+                    text = "Confirmar Exclusão de Mídia",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Confirma excluir a Mídia #$displayId (${targetMedia.originalFileName})? A contagem de IDs será reorganizada automaticamente para se manter em ordem."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteImage(targetMedia.id)
+                        mediaToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    ),
+                    modifier = Modifier.testTag("confirm_delete_media_button")
+                ) {
+                    Text("Confirmar Exclusão")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { mediaToDelete = null },
+                    modifier = Modifier.testTag("cancel_delete_media_button")
+                ) {
+                    Text("Cancelar")
+                }
+            }
+        )
     }
 }
 

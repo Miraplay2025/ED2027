@@ -290,28 +290,48 @@ class VideoRenderingService : Service() {
         customOutputDirUri: String?,
         defaultDir: File
     ): String {
-        // Se usuário definiu pasta personalizada via SAF
+        // Se usuário definiu pasta personalizada via SAF (content://) ou diretório de arquivo local
         if (!customOutputDirUri.isNullOrBlank()) {
-            try {
-                val treeUri = Uri.parse(customOutputDirUri)
-                val pickedDir = DocumentFile.fromTreeUri(applicationContext, treeUri)
-                if (pickedDir != null && pickedDir.canWrite()) {
-                    var targetDoc = pickedDir.findFile(fileName)
-                    if (targetDoc != null) {
-                        targetDoc.delete()
-                    }
-                    targetDoc = pickedDir.createFile("video/mp4", fileName)
-                    if (targetDoc != null) {
-                        contentResolver.openOutputStream(targetDoc.uri)?.use { outStream ->
-                            FileInputStream(tempFile).use { inStream ->
-                                inStream.copyTo(outStream)
-                            }
+            if (customOutputDirUri.startsWith("content://")) {
+                try {
+                    val treeUri = Uri.parse(customOutputDirUri)
+                    val pickedDir = DocumentFile.fromTreeUri(applicationContext, treeUri)
+                    if (pickedDir != null && pickedDir.canWrite()) {
+                        var targetDoc = pickedDir.findFile(fileName)
+                        if (targetDoc != null) {
+                            targetDoc.delete()
                         }
-                        return targetDoc.uri.toString()
+                        targetDoc = pickedDir.createFile("video/mp4", fileName)
+                        if (targetDoc != null) {
+                            contentResolver.openOutputStream(targetDoc.uri)?.use { outStream ->
+                                FileInputStream(tempFile).use { inStream ->
+                                    inStream.copyTo(outStream)
+                                }
+                            }
+                            return targetDoc.uri.toString()
+                        }
                     }
+                } catch (e: Exception) {
+                    RenderingManager.log("Aviso: Falha ao salvar no diretório SAF personalizado: ${e.message}. Salvando no diretório padrão.")
                 }
-            } catch (e: Exception) {
-                RenderingManager.log("Aviso: Falha ao salvar no diretório SAF personalizado: ${e.message}. Salvando no diretório padrão.")
+            } else {
+                try {
+                    val customDirFile = File(customOutputDirUri)
+                    if (!customDirFile.exists()) {
+                        customDirFile.mkdirs()
+                    }
+                    if (customDirFile.exists() && customDirFile.canWrite()) {
+                        val destFile = File(customDirFile, fileName)
+                        tempFile.copyTo(destFile, overwrite = true)
+                        MediaScannerConnection.scanFile(
+                            applicationContext,
+                            arrayOf(destFile.absolutePath),
+                            arrayOf("video/mp4"),
+                            null
+                        )
+                        return destFile.absolutePath
+                    }
+                } catch (_: Exception) {}
             }
         }
 

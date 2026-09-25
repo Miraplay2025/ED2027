@@ -32,6 +32,8 @@ import com.example.engine.TransitionValidationResult
 import com.example.engine.ZipExtractResult
 import com.example.engine.ZipExtractor
 import com.example.service.VideoRenderingService
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -84,7 +86,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _selectedBitrateMbps = MutableStateFlow(VideoBitratePreset.DEFAULT.mbps)
     val selectedBitrateMbps: StateFlow<Float> = _selectedBitrateMbps.asStateFlow()
 
-    // Transições Suaves CapCut (20 transições + 0 Sem Transição)
+    // Transições Suaves (20 transições + 0 Sem Transição)
     private val _selectedTransition = MutableStateFlow(TransitionEffect.DEFAULT)
     val selectedTransition: StateFlow<TransitionEffect> = _selectedTransition.asStateFlow()
 
@@ -102,7 +104,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _transitionError = MutableStateFlow<String?>(null)
     val transitionError: StateFlow<String?> = _transitionError.asStateFlow()
 
-    // Sons de Transições Rápidas (17 sons profissionais CapCut + custom + 0 Sem Som)
+    // Sons de Transições Rápidas (17 sons profissionais + custom + 0 Sem Som)
     private val _allAvailableSounds = MutableStateFlow<List<TransitionSoundEffect>>(TransitionSoundEffect.BUILT_IN_SOUNDS)
     val allAvailableSounds: StateFlow<List<TransitionSoundEffect>> = _allAvailableSounds.asStateFlow()
 
@@ -133,6 +135,21 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _isMasterConfigOpen = MutableStateFlow(false)
     val isMasterConfigOpen: StateFlow<Boolean> = _isMasterConfigOpen.asStateFlow()
 
+    private val _isMediaGalleryOpen = MutableStateFlow(false)
+    val isMediaGalleryOpen: StateFlow<Boolean> = _isMediaGalleryOpen.asStateFlow()
+
+    private val _isZipBrowserOpen = MutableStateFlow(false)
+    val isZipBrowserOpen: StateFlow<Boolean> = _isZipBrowserOpen.asStateFlow()
+
+    private val _zipWarningMessage = MutableStateFlow<String?>(null)
+    val zipWarningMessage: StateFlow<String?> = _zipWarningMessage.asStateFlow()
+
+    private val _validationBannerMessage = MutableStateFlow<String?>(null)
+    val validationBannerMessage: StateFlow<String?> = _validationBannerMessage.asStateFlow()
+
+    private var errorDismissJob: Job? = null
+    private var zipWarningJob: Job? = null
+
     private val _isTestPlaying = MutableStateFlow(true)
     val isTestPlaying: StateFlow<Boolean> = _isTestPlaying.asStateFlow()
 
@@ -157,8 +174,15 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             repository.getProject(projectId).collect { proj ->
                 _project.value = proj
-                if (proj != null && _syntaxText.value.isEmpty()) {
-                    _syntaxText.value = proj.syntaxConfig
+                if (proj != null) {
+                    if (_syntaxText.value.isEmpty()) {
+                        _syntaxText.value = proj.syntaxConfig
+                    }
+                    // Garante que a pasta padrão criada pelo app ou pasta recente esteja selecionada automaticamente
+                    if (proj.customOutputDirUri.isNullOrBlank()) {
+                        val defaultOrRecent = appPreferences.getDefaultOutputDirUri()
+                        repository.updateCustomOutputDir(projectId, defaultOrRecent)
+                    }
                 }
             }
         }
@@ -245,38 +269,39 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _activeResourcePanel.value = null
     }
 
-    fun updateTransitionIdsText(newText: String) {
-        _transitionIdsText.value = newText
-        when (val result = SyntaxParser.validateTransitionIds(newText)) {
-            is TransitionValidationResult.Success -> {
-                _transitionError.value = null
-                val firstId = result.transitionIds.firstOrNull() ?: 1
-                _selectedTransition.value = TransitionEffect.getOrCut(firstId)
-            }
-            is TransitionValidationResult.Error -> {
-                _transitionError.value = result.message
-            }
+    private fun showFiveSecondValidationError(shortMessage: String) {
+        _validationBannerMessage.value = shortMessage
+        errorDismissJob?.cancel()
+        errorDismissJob = viewModelScope.launch {
+            delay(5000L)
+            _validationBannerMessage.value = null
+            _transitionError.value = null
+            _transitionSoundError.value = null
+            _syntaxError.value = null
         }
     }
 
-    fun validateTransitionIdsInput(emitSuccessMessage: Boolean = true): Boolean {
+    fun updateTransitionIdsText(newText: String) {
+        _transitionIdsText.value = newText
+        _transitionError.value = null
+        val result = SyntaxParser.validateTransitionIds(newText)
+        if (result is TransitionValidationResult.Success) {
+            val firstId = result.transitionIds.firstOrNull() ?: 1
+            _selectedTransition.value = TransitionEffect.getOrCut(firstId)
+        }
+    }
+
+    fun validateTransitionIdsInput(emitSuccessMessage: Boolean = false): Boolean {
         return when (val result = SyntaxParser.validateTransitionIds(_transitionIdsText.value)) {
             is TransitionValidationResult.Success -> {
                 _transitionError.value = null
                 val firstId = result.transitionIds.firstOrNull() ?: 1
                 _selectedTransition.value = TransitionEffect.getOrCut(firstId)
-                if (emitSuccessMessage) {
-                    viewModelScope.launch {
-                        _messageEvents.emit("IDs de transições validados com sucesso!")
-                    }
-                }
                 true
             }
             is TransitionValidationResult.Error -> {
                 _transitionError.value = result.message
-                viewModelScope.launch {
-                    _messageEvents.emit("Erro nas Transições: ${result.message}")
-                }
+                showFiveSecondValidationError(result.message)
                 false
             }
         }
@@ -294,21 +319,17 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updateTransitionSoundIdsText(newText: String) {
         _transitionSoundIdsText.value = newText
+        _transitionSoundError.value = null
         val availableIds = _allAvailableSounds.value.map { it.id }.toSet()
-        when (val result = SyntaxParser.validateTransitionSoundIds(newText, availableIds)) {
-            is TransitionSoundValidationResult.Success -> {
-                _transitionSoundError.value = null
-                val firstId = result.soundIds.firstOrNull() ?: 1
-                val matched = _allAvailableSounds.value.find { it.id == firstId } ?: TransitionSoundEffect.DEFAULT
-                _selectedSound.value = matched
-            }
-            is TransitionSoundValidationResult.Error -> {
-                _transitionSoundError.value = result.message
-            }
+        val result = SyntaxParser.validateTransitionSoundIds(newText, availableIds)
+        if (result is TransitionSoundValidationResult.Success) {
+            val firstId = result.soundIds.firstOrNull() ?: 1
+            val matched = _allAvailableSounds.value.find { it.id == firstId } ?: TransitionSoundEffect.DEFAULT
+            _selectedSound.value = matched
         }
     }
 
-    fun validateTransitionSoundIdsInput(emitSuccessMessage: Boolean = true): Boolean {
+    fun validateTransitionSoundIdsInput(emitSuccessMessage: Boolean = false): Boolean {
         val availableIds = _allAvailableSounds.value.map { it.id }.toSet()
         return when (val result = SyntaxParser.validateTransitionSoundIds(_transitionSoundIdsText.value, availableIds)) {
             is TransitionSoundValidationResult.Success -> {
@@ -316,18 +337,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 val firstId = result.soundIds.firstOrNull() ?: 1
                 val matched = _allAvailableSounds.value.find { it.id == firstId } ?: TransitionSoundEffect.DEFAULT
                 _selectedSound.value = matched
-                if (emitSuccessMessage) {
-                    viewModelScope.launch {
-                        _messageEvents.emit("IDs de sons de transição validados com sucesso!")
-                    }
-                }
                 true
             }
             is TransitionSoundValidationResult.Error -> {
                 _transitionSoundError.value = result.message
-                viewModelScope.launch {
-                    _messageEvents.emit("Erro nos Sons de Transição: ${result.message}")
-                }
+                showFiveSecondValidationError(result.message)
                 false
             }
         }
@@ -401,7 +415,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             repository.updateProjectSyntax(currentProjectId, result.movementSyntaxText)
-            _messageEvents.emit("Prompts automáticos gerados com movimentos (0-26), durações (5-10s), transições (0-20) e sons!")
+            _messageEvents.emit("Prompts automáticos gerados com movimentos (0-26), durações (5-12s), transições (0-20) e sons!")
         }
     }
 
@@ -447,22 +461,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun autoGenerateSyntax() {
-        val count = _images.value.size
-        if (count == 0) {
-            _syntaxError.value = "Importe imagens para o projeto antes de gerar a sintaxe."
-            return
-        }
-        val generated = SyntaxParser.generateDefaultSyntax(
-            totalImages = count,
-            defaultMovementId = _selectedMovement.value.id,
-            videoMediaIndices = getVideoMediaIndices()
-        )
-        _syntaxText.value = generated
-        _syntaxError.value = null
-        viewModelScope.launch {
-            repository.updateProjectSyntax(currentProjectId, generated)
-            _messageEvents.emit("Sintaxe automática gerada para $count mídias.")
-        }
+        generateAutomaticPrompts()
     }
 
     fun validateAndSaveSyntax(): Boolean {
@@ -476,16 +475,38 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 _syntaxError.value = null
                 viewModelScope.launch {
                     repository.updateProjectSyntax(currentProjectId, _syntaxText.value)
-                    _messageEvents.emit("Sintaxe validada com sucesso!")
                 }
                 _isSyntaxModalOpen.value = false
                 return true
             }
             is SyntaxParseResult.Error -> {
                 _syntaxError.value = result.message
+                showFiveSecondValidationError(result.message)
                 return false
             }
         }
+    }
+
+    fun openMediaGallery() {
+        _isMediaGalleryOpen.value = true
+    }
+
+    fun closeMediaGallery() {
+        _isMediaGalleryOpen.value = false
+    }
+
+    fun openZipBrowser() {
+        _zipWarningMessage.value = null
+        _isZipBrowserOpen.value = true
+    }
+
+    fun closeZipBrowser() {
+        _isZipBrowserOpen.value = false
+        _zipWarningMessage.value = null
+    }
+
+    fun clearZipWarning() {
+        _zipWarningMessage.value = null
     }
 
     fun importDirectImages(context: Context, uris: List<Uri>) {
@@ -507,12 +528,20 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             when (val result = ZipExtractor.extractZip(context, zipUri, currentProjectId)) {
                 is ZipExtractResult.Success -> {
+                    _zipWarningMessage.value = null
+                    _isZipBrowserOpen.value = false
                     repository.addImages(currentProjectId, result.extractedFiles)
                     _messageEvents.emit("${result.extractedFiles.size} mídias extraídas do ZIP com sucesso.")
                     refreshDefaultSyntaxIfNeeded()
                 }
                 is ZipExtractResult.Error -> {
-                    _messageEvents.emit(result.message)
+                    _zipWarningMessage.value = "Formato não suportado"
+                    zipWarningJob?.cancel()
+                    zipWarningJob = viewModelScope.launch {
+                        delay(5000L)
+                        _zipWarningMessage.value = null
+                    }
+                    _messageEvents.emit("Formato não suportado")
                 }
             }
         }
@@ -536,6 +565,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun deleteImage(imageId: Long) {
         viewModelScope.launch {
+            val beforeImages = repository.getImagesSync(currentProjectId)
+            val deletedOrderIndex = beforeImages.firstOrNull { it.id == imageId }?.orderIndex
+
             repository.deleteImage(currentProjectId, imageId)
             _messageEvents.emit("Mídia excluída com sucesso.")
             val remaining = repository.getImagesSync(currentProjectId)
@@ -543,11 +575,26 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 val videoIndices = remaining.mapIndexedNotNull { index, img ->
                     if (MediaHelper.isVideo(img.filePath)) index + 1 else null
                 }.toSet()
-                val updatedSyntax = SyntaxParser.generateDefaultSyntax(
-                    totalImages = remaining.size,
-                    defaultMovementId = _selectedMovement.value.id,
-                    videoMediaIndices = videoIndices
-                )
+
+                val existingLines = _syntaxText.value
+                    .lines()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() && it.contains(":") }
+
+                val updatedSyntax = if (deletedOrderIndex != null && existingLines.size == beforeImages.size) {
+                    val filteredLines = existingLines.filterIndexed { idx, _ -> (idx + 1) != deletedOrderIndex }
+                    filteredLines.mapIndexed { newIdx, line ->
+                        val afterColon = line.substringAfter(":")
+                        "${newIdx + 1}: ${afterColon.trim()}"
+                    }.joinToString("\n")
+                } else {
+                    SyntaxParser.generateDefaultSyntax(
+                        totalImages = remaining.size,
+                        defaultMovementId = _selectedMovement.value.id,
+                        videoMediaIndices = videoIndices
+                    )
+                }
+
                 _syntaxText.value = updatedSyntax
                 repository.updateProjectSyntax(currentProjectId, updatedSyntax)
             } else {
@@ -571,13 +618,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun startRendering(context: Context): Boolean {
         val totalImages = _images.value.size
         if (totalImages == 0) {
-            viewModelScope.launch {
-                _messageEvents.emit("Nenhuma mídia importada. Adicione fotos ou vídeos antes de iniciar.")
-            }
+            showFiveSecondValidationError("Adicione mídias antes de renderizar")
             return false
         }
 
-        // 1. Valida as IDs de transições (qualquer erro bloqueia e exige correção pelo usuário)
+        // 1. Valida as IDs de transições ao clicar em Iniciar Renderização
         val transValidation = SyntaxParser.validateTransitionIds(_transitionIdsText.value)
         val transitionIds = when (transValidation) {
             is TransitionValidationResult.Success -> {
@@ -586,15 +631,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             }
             is TransitionValidationResult.Error -> {
                 _transitionError.value = transValidation.message
+                showFiveSecondValidationError(transValidation.message)
                 _isMasterConfigOpen.value = true
-                viewModelScope.launch {
-                    _messageEvents.emit("Erro no campo de Transições: ${transValidation.message} Corrija para prosseguir.")
-                }
-                null
+                return false
             }
         }
 
-        // 2. Valida os IDs de sons de transição (qualquer erro bloqueia e exige correção pelo usuário)
+        // 2. Valida os IDs de sons de transição ao clicar em Iniciar Renderização
         val availableSoundIds = _allAvailableSounds.value.map { it.id }.toSet()
         val soundValidation = SyntaxParser.validateTransitionSoundIds(_transitionSoundIdsText.value, availableSoundIds)
         val transitionSoundIds = when (soundValidation) {
@@ -604,15 +647,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             }
             is TransitionSoundValidationResult.Error -> {
                 _transitionSoundError.value = soundValidation.message
+                showFiveSecondValidationError(soundValidation.message)
                 _isMasterConfigOpen.value = true
-                viewModelScope.launch {
-                    _messageEvents.emit("Erro no campo de Sons de Transição: ${soundValidation.message} Corrija para prosseguir.")
-                }
-                null
+                return false
             }
         }
 
-        // 3. Valida sintaxe antes de iniciar (incluindo validação de vídeo estático MOVIMENTO 0)
+        // 3. Valida Animação de Câmera (sintaxe) ao clicar em Iniciar Renderização
         val parseResult = SyntaxParser.parseAndValidate(
             text = _syntaxText.value,
             totalProjectImages = totalImages,
@@ -620,17 +661,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         )
         if (parseResult is SyntaxParseResult.Error) {
             _syntaxError.value = parseResult.message
+            showFiveSecondValidationError(parseResult.message)
             _isMasterConfigOpen.value = true
-            viewModelScope.launch {
-                _messageEvents.emit("Erro na sintaxe: ${parseResult.message} Corrija para prosseguir.")
-            }
             return false
         } else {
             _syntaxError.value = null
-        }
-
-        if (transitionIds == null || transitionSoundIds == null) {
-            return false
         }
 
         val configs = (parseResult as SyntaxParseResult.Success).configs

@@ -54,7 +54,7 @@ import com.example.data.model.TransitionEffect
 import java.util.Locale
 
 /**
- * Carrossel horizontal de Transições Suaves contendo exatamente 20 opções inspiradas no CapCut
+ * Carrossel horizontal de Transições Suaves contendo exatamente 20 opções
  * (focadas em dissolução, fumaça, borrão, desfoque e zoom suave) + opção "0 = Sem Transição".
  *
  * Abaixo da linha horizontal dos efeitos de transição, exibe a barra onde o usuário pode

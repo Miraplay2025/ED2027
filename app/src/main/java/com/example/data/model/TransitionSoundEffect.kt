@@ -94,35 +94,35 @@ data class TransitionSoundEffect(
             category = SoundCategory.FAST_TRANSITION
         )
 
-        // +5 Novos Sons de Transição Personalizados Estilo CapCut (IDs 13 a 17)
+        // +5 Novos Sons de Transição Personalizados (IDs 13 a 17)
         val CAMERA_SHUTTER = TransitionSoundEffect(
             id = 13,
             name = "Obturador Flash",
-            description = "Clique duplo de câmera DSLR estilo CapCut (95ms)",
+            description = "Clique duplo de câmera DSLR profissional (95ms)",
             category = SoundCategory.FAST_TRANSITION
         )
         val CINEMATIC_BOOM = TransitionSoundEffect(
             id = 14,
             name = "Bass Drop Impact",
-            description = "Impacto sub-grave cinematográfico CapCut (180ms)",
+            description = "Impacto sub-grave cinematográfico (180ms)",
             category = SoundCategory.FAST_TRANSITION
         )
         val MAGIC_SPARKLE = TransitionSoundEffect(
             id = 15,
             name = "Brilho Cristal Chime",
-            description = "Arpejo mágico cristalino brilhante CapCut (150ms)",
+            description = "Arpejo mágico cristalino brilhante (150ms)",
             category = SoundCategory.FAST_TRANSITION
         )
         val VINYL_REWIND = TransitionSoundEffect(
             id = 16,
             name = "Rewind Tape Spin",
-            description = "Efeito rápido de rebobinar fita/vinil CapCut (140ms)",
+            description = "Efeito rápido de rebobinar fita/vinil (140ms)",
             category = SoundCategory.FAST_TRANSITION
         )
         val CYBER_RISER_HIT = TransitionSoundEffect(
             id = 17,
             name = "Cyber Riser & Hit",
-            description = "Subida reversa rápida com impacto CapCut (165ms)",
+            description = "Subida reversa rápida com impacto (165ms)",
             category = SoundCategory.FAST_TRANSITION
         )
 

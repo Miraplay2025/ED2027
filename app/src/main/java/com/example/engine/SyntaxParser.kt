@@ -51,13 +51,13 @@ object SyntaxParser {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) {
             return SyntaxParseResult.Error(
-                "A caixa de texto de sintaxe está vazia. Por favor configure as instruções para as mídias."
+                "Campo de animação está vazio"
             )
         }
 
         if (totalProjectImages == 0) {
             return SyntaxParseResult.Error(
-                "O projeto não possui mídias importadas. Adicione fotos ou vídeos antes de configurar a sintaxe."
+                "Adicione mídias ao projeto primeiro"
             )
         }
 
@@ -69,7 +69,7 @@ object SyntaxParser {
 
         if (rawTokens.isEmpty()) {
             return SyntaxParseResult.Error(
-                "Nenhum comando detectado na sintaxe informada."
+                "Nenhum comando válido foi informado"
             )
         }
 
@@ -80,7 +80,7 @@ object SyntaxParser {
             val parts = token.split("+").map { it.trim() }
             if (parts.size != 3) {
                 return SyntaxParseResult.Error(
-                    message = "Formato inválido no trecho: '$token'. O formato exigido é: IMAGEM X + MOVIMENTO Y + Z.Zs",
+                    message = "Formato inválido no comando informado",
                     faultySnippet = token
                 )
             }
@@ -93,28 +93,28 @@ object SyntaxParser {
             val imageMatch = Regex("(?i)(?:IMAGEM|M[IÍ]DIA|VIDEO)?\\s*(\\d+)").matchEntire(imagePart)
             if (imageMatch == null) {
                 return SyntaxParseResult.Error(
-                    message = "Identificador de mídia inválido em '$imagePart'. Esperado: 'IMAGEM X' (ex: IMAGEM 1).",
+                    message = "Identificador de mídia é inválido",
                     faultySnippet = token
                 )
             }
             val imageIndex = imageMatch.groupValues[1].toIntOrNull()
             if (imageIndex == null || imageIndex <= 0) {
                 return SyntaxParseResult.Error(
-                    message = "Número de imagem inválido em '$imagePart'.",
+                    message = "Número de imagem é inválido",
                     faultySnippet = token
                 )
             }
 
             if (imageIndex > totalProjectImages) {
                 return SyntaxParseResult.Error(
-                    message = "Validação de Existência falhou: Mídia $imageIndex não existe no projeto. O projeto possui apenas $totalProjectImages mídia(s).",
+                    message = "Mídia $imageIndex não existe no projeto",
                     faultySnippet = token
                 )
             }
 
             if (seenImageIndices.contains(imageIndex)) {
                 return SyntaxParseResult.Error(
-                    message = "Validação de Duplicidade falhou: Mídia $imageIndex foi configurada mais de uma vez.",
+                    message = "Mídia $imageIndex foi configurada duplicada",
                     faultySnippet = token
                 )
             }
@@ -124,21 +124,21 @@ object SyntaxParser {
             val movementMatch = Regex("(?i)MOVIMENTO?\\s*(\\d+)").matchEntire(movementPart)
             if (movementMatch == null) {
                 return SyntaxParseResult.Error(
-                    message = "Identificador de movimento inválido em '$movementPart'. Esperado: 'MOVIMENTO Y' (ex: MOVIMENTO 1).",
+                    message = "Formato de movimento é inválido",
                     faultySnippet = token
                 )
             }
             val movementId = movementMatch.groupValues[1].toIntOrNull()
             if (movementId == null) {
                 return SyntaxParseResult.Error(
-                    message = "Número de movimento inválido em '$movementPart'.",
+                    message = "Número de movimento é inválido",
                     faultySnippet = token
                 )
             }
 
             if (movementId !in 0..com.example.data.model.MovementEffect.MAX_ID) {
                 return SyntaxParseResult.Error(
-                    message = "Validação de Existência de Movimento falhou: MOVIMENTO $movementId é inexistente. Só existem animações de 0 a ${com.example.data.model.MovementEffect.MAX_ID}.",
+                    message = "MOVIMENTO $movementId é inexistente",
                     faultySnippet = token
                 )
             }
@@ -146,7 +146,7 @@ object SyntaxParser {
             // REGRA: Vídeos NÃO DEVEM suportar aplicação de animação de movimento!
             if (videoMediaIndices.contains(imageIndex) && movementId != 0) {
                 return SyntaxParseResult.Error(
-                    message = "Vídeos não suportam aplicação de animação de movimento: A Mídia $imageIndex é um arquivo de vídeo e foi configurada com MOVIMENTO $movementId. Altere para 'MOVIMENTO 0' (estático) para esta mídia.",
+                    message = "Vídeos não suportam animação dinâmica",
                     faultySnippet = token
                 )
             }
@@ -154,16 +154,22 @@ object SyntaxParser {
             // 3. Validação de DURAÇÃO (deve ter 's' no final)
             if (!durationPart.endsWith("s", ignoreCase = true)) {
                 return SyntaxParseResult.Error(
-                    message = "Validação de Duração falhou na Mídia $imageIndex: o valor '$durationPart' deve conter o sufixo 's' (ex: 4.0s ou 6.0s).",
+                    message = "Duração deve terminar com s",
                     faultySnippet = token
                 )
             }
 
-            val durationNumberStr = durationPart.dropLast(1).trim()
+            val durationNumberStr = durationPart.dropLast(1).trim().replace(',', '.')
             val durationVal = durationNumberStr.toFloatOrNull()
             if (durationVal == null || durationVal <= 0.1f) {
                 return SyntaxParseResult.Error(
-                    message = "Validação de Duração falhou na Mídia $imageIndex: tempo inválido '$durationPart'. O tempo deve ser numérico maior que 0.1s.",
+                    message = "Tempo de duração é inválido",
+                    faultySnippet = token
+                )
+            }
+            if (durationVal > 12.0f) {
+                return SyntaxParseResult.Error(
+                    message = "Duração máxima permitida é 12s",
                     faultySnippet = token
                 )
             }
@@ -180,9 +186,8 @@ object SyntaxParser {
 
         // Validação de Cobertura Total: TODAS as mídias devem ter uma linha configurada
         if (parsedConfigs.size != totalProjectImages) {
-            val missing = (1..totalProjectImages).filter { it !in seenImageIndices }
             return SyntaxParseResult.Error(
-                message = "Validação de Cobertura Total falhou: O projeto possui $totalProjectImages mídia(s), mas apenas ${parsedConfigs.size} foram configuradas. Mídias ausentes: ${missing.joinToString { "MÍDIA $it" }}."
+                message = "Erro: apenas ${parsedConfigs.size} foram configuradas"
             )
         }
 
@@ -208,7 +213,7 @@ object SyntaxParser {
             } else {
                 defaultMovementId
             }
-            val dur = String.format(java.util.Locale.US, "%.1fs", defaultDurationSeconds)
+            val dur = String.format(java.util.Locale.US, "%.1fs", defaultDurationSeconds.coerceAtMost(12.0f))
             "IMAGEM $index + MOVIMENTO $mov + $dur"
         }
     }
@@ -220,14 +225,14 @@ object SyntaxParser {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) {
             return TransitionValidationResult.Error(
-                "O campo de IDs de transições está vazio. Informe os IDs de 1 a 20 separados por vírgula (ex: 1, 4, 2, 8)."
+                "Informe os IDs das transições"
             )
         }
 
         val tokens = trimmed.split(",").map { it.trim() }.filter { it.isNotEmpty() }
         if (tokens.isEmpty()) {
             return TransitionValidationResult.Error(
-                "Nenhum ID de transição encontrado. Informe IDs de 1 a 20 separados por vírgula."
+                "Informe os IDs das transições"
             )
         }
 
@@ -236,13 +241,13 @@ object SyntaxParser {
             val id = token.toIntOrNull()
             if (id == null) {
                 return TransitionValidationResult.Error(
-                    message = "ID de transição inválido: '$token'. Informe apenas números de 1 a 20 (ou 0 para sem transição) separados por vírgula.",
+                    message = "ID de transição é inválido",
                     faultyId = token
                 )
             }
             if (id !in 0..20) {
                 return TransitionValidationResult.Error(
-                    message = "ID de transição inexistente: '$token'. Os IDs válidos são de 1 a 20 inspirados no CapCut (ou 0 para sem transição).",
+                    message = "Transição deve ser entre 0-20",
                     faultyId = token
                 )
             }
@@ -262,14 +267,14 @@ object SyntaxParser {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) {
             return TransitionSoundValidationResult.Error(
-                "O campo de IDs de sons de transição está vazio. Informe os IDs separados por vírgula (ex: 1, 3, 5, 8)."
+                "Informe os IDs dos sons"
             )
         }
 
         val tokens = trimmed.split(",").map { it.trim() }.filter { it.isNotEmpty() }
         if (tokens.isEmpty()) {
             return TransitionSoundValidationResult.Error(
-                "Nenhum ID de som de transição encontrado. Informe os IDs numéricos separados por vírgula."
+                "Informe os IDs dos sons"
             )
         }
 
@@ -278,14 +283,13 @@ object SyntaxParser {
             val id = token.toIntOrNull()
             if (id == null) {
                 return TransitionSoundValidationResult.Error(
-                    message = "ID de som inválido: '$token'. Digite apenas números separados por vírgula.",
+                    message = "ID de som é inválido",
                     faultyId = token
                 )
             }
             if (id !in availableSoundIds && id != 0) {
-                val availableSorted = availableSoundIds.sorted().joinToString(", ")
                 return TransitionSoundValidationResult.Error(
-                    message = "ID de som inexistente: '$token'. Os IDs válidos disponíveis são: 0 (Sem som), $availableSorted.",
+                    message = "ID de som não existe",
                     faultyId = token
                 )
             }
@@ -296,7 +300,7 @@ object SyntaxParser {
     }
 
     /**
-     * Gera prompts totalmente aleatórios com movimentos, durações, transições e sons.
+     * Gera prompts totalmente aleatórios com movimentos, durações (máximo 12 segundos), transições e sons.
      */
     fun generateRandomPrompts(
         totalImages: Int,
@@ -318,7 +322,8 @@ object SyntaxParser {
             } else {
                 random.nextInt(com.example.data.model.MovementEffect.MAX_ID + 1)
             }
-            val randomDuration = 5.0f + (random.nextInt(51) / 10.0f)
+            // Duração aleatória de cada mídia com máximo de 12.0 segundos (entre 3.0s e 12.0s)
+            val randomDuration = (3.0f + (random.nextInt(91) / 10.0f)).coerceAtMost(12.0f)
             val durFormatted = String.format(java.util.Locale.US, "%.1fs", randomDuration)
             "IMAGEM $index + MOVIMENTO $randomMov + $durFormatted"
         }

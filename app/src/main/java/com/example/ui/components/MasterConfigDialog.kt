@@ -59,10 +59,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -132,7 +135,22 @@ fun MasterConfigDialog(
     if (!isOpen) return
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabTitles = listOf("Transições", "Sons de Transições", "Qualidade", "Sintaxe & IA", "Logs & Status")
+    val tabTitles = listOf("Transições", "Sons de Transições", "Qualidade", "Animação de Câmera", "Logs & Status")
+
+    // Estado temporário visível por 5 segundos quando houver erro ao clicar em Iniciar Renderização
+    var visibleErrorText by remember { mutableStateOf<String?>(null) }
+    var errorTriggerCount by remember { mutableIntStateOf(0) }
+    val activeValidationError = transitionError ?: transitionSoundError ?: syntaxError
+
+    LaunchedEffect(activeValidationError, errorTriggerCount) {
+        if (activeValidationError != null) {
+            visibleErrorText = activeValidationError
+            delay(5000L)
+            visibleErrorText = null
+        } else {
+            visibleErrorText = null
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -304,9 +322,8 @@ fun MasterConfigDialog(
                 HorizontalDivider(color = Color(0xFF262C3E))
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Banner de Erro de Validação caso qualquer campo não cumpra as regras
-                val activeValidationError = transitionError ?: transitionSoundError ?: syntaxError
-                if (activeValidationError != null) {
+                // Banner de Erro de Validação (até 6 palavras na mesma linha sem corte, exibido por 5 segundos)
+                if (visibleErrorText != null) {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = Color(0xFF3B1219),
@@ -317,29 +334,25 @@ fun MasterConfigDialog(
                             .testTag("master_config_validation_error_banner")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ErrorOutline,
                                 contentDescription = "Erro de validação",
                                 tint = Color(0xFFFF5252),
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = activeValidationError,
-                                    color = Color(0xFFFF8A80),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "Corrija o problema indicado acima para prosseguir com a renderização.",
-                                    color = Color(0xFFFFCDD2),
-                                    fontSize = 10.sp
-                                )
-                            }
+                            Text(
+                                text = visibleErrorText ?: "",
+                                color = Color(0xFFFF8A80),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Visible
+                            )
                         }
                     }
                 }
@@ -365,15 +378,20 @@ fun MasterConfigDialog(
                             val soundOk = onValidateTransitionSounds()
                             val syntaxOk = onSaveAndValidateSyntax()
                             if (!transOk) {
+                                errorTriggerCount++
                                 selectedTab = 0
                             } else if (!soundOk) {
+                                errorTriggerCount++
                                 selectedTab = 1
                             } else if (!syntaxOk) {
+                                errorTriggerCount++
                                 selectedTab = 3
                             } else {
                                 val started = onStartRendering()
                                 if (started) {
                                     selectedTab = 4 // Move para a aba de logs automaticamente após validar tudo
+                                } else {
+                                    errorTriggerCount++
                                 }
                             }
                         }
@@ -551,18 +569,6 @@ private fun TransitionsTabContent(
                         fontSize = 13.sp,
                         color = Color.White
                     )
-
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF262E44)
-                    ) {
-                        Text(
-                            text = "20 Opções CapCut + 0",
-                            fontSize = 10.sp,
-                            color = Color(0xFF00E5FF),
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -591,44 +597,6 @@ private fun TransitionsTabContent(
                         unfocusedTextColor = Color.White
                     )
                 )
-
-                if (transitionError != null) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = transitionError,
-                        color = Color(0xFFFF5252),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Botão de Validar em cor bem visível e destacável
-                Button(
-                    onClick = onValidateTransitions,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
-                        .testTag("validate_transitions_button"),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF00E676),
-                        contentColor = Color(0xFF051B11)
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Validar IDs das Transições",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -706,18 +674,6 @@ private fun TransitionSoundsTabContent(
                             color = Color.White
                         )
                     }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF1E283C)
-                    ) {
-                        Text(
-                            text = "17 Efeitos CapCut + Teclas",
-                            fontSize = 10.sp,
-                            color = Color(0xFF00E5FF),
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -747,44 +703,6 @@ private fun TransitionSoundsTabContent(
                     )
                 )
 
-                if (transitionSoundError != null) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = transitionSoundError,
-                        color = Color(0xFFFF5252),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Botão de Validar em cor bem visível e destacável
-                Button(
-                    onClick = onValidateTransitionSounds,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
-                        .testTag("validate_transition_sounds_button"),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF00E676),
-                        contentColor = Color(0xFF051B11)
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Validar IDs dos Sons",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
-
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Presets Rápidos
@@ -804,7 +722,7 @@ private fun TransitionSoundsTabContent(
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("CapCut Pro (5-17)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("Efeitos Pro (5-17)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                     FilledTonalButton(
                         onClick = { onTransitionSoundIdsChange("0") },
@@ -919,7 +837,7 @@ private fun QualityTabContent(
 }
 
 /**
- * Aba de Sintaxe Textual e Automação
+ * Aba de Animação de Câmera
  */
 @Composable
 private fun SyntaxTabContent(
@@ -937,34 +855,17 @@ private fun SyntaxTabContent(
             border = BorderStroke(1.dp, Color(0xFF2A3248))
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Estrutura Textual da Sequência",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = Color.White
-                    )
-
-                    Button(
-                        onClick = onAutoGeneratePrompts,
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
-                        contentPadding = ButtonDefaults.ContentPadding
-                    ) {
-                        Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Gerar Prompts Auto", fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Bold)
-                    }
-                }
+                Text(
+                    text = "Animação de Câmera",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    color = Color.White
+                )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Formato obrigatório: IMAGEM X + MOVIMENTO Y + Z.Zs (Movimentos 0 a 26, Duração 5.0s a 10.0s)",
+                    text = "Formato obrigatório: IMAGEM X + MOVIMENTO Y + Z.Zs (Movimentos 0 a 26, Duração máxima 12.0s)",
                     fontSize = 11.sp,
                     color = Color(0xFF94A3B8)
                 )
@@ -988,38 +889,31 @@ private fun SyntaxTabContent(
                     )
                 )
 
-                if (syntaxError != null) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = syntaxError,
-                        color = Color(0xFFFF5252),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Botão de Validar Sintaxe em cor bem visível e destacável
+                // Botão "Aleatoriamente" posicionado abaixo do campo (gera duração máxima de 12 segundos)
                 Button(
-                    onClick = onSaveAndValidate,
+                    onClick = onAutoGeneratePrompts,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(46.dp)
-                        .testTag("validate_syntax_dialog_button"),
+                        .height(44.dp)
+                        .testTag("random_camera_animation_button"),
                     shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF00E676),
-                        contentColor = Color(0xFF051B11)
-                    )
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF))
                 ) {
                     Icon(
-                        imageVector = Icons.Default.CheckCircle,
+                        imageVector = Icons.Default.AutoAwesome,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        tint = Color.Black,
+                        modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Validar e Aplicar Sintaxe", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Aleatoriamente",
+                        fontSize = 13.sp,
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }

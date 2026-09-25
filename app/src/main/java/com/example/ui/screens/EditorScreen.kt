@@ -73,6 +73,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.VideoBitratePreset
+import com.example.ui.components.AppMediaGalleryDialog
+import com.example.ui.components.AppZipBrowserDialog
 import com.example.ui.components.LivePreviewStage
 import com.example.ui.components.MasterConfigDialog
 import com.example.ui.components.MovementsCarousel
@@ -130,6 +132,10 @@ fun EditorScreen(
     val selectedResolution by viewModel.selectedResolution.collectAsStateWithLifecycle()
     val selectedFps by viewModel.selectedFps.collectAsStateWithLifecycle()
     val selectedBitrateMbps by viewModel.selectedBitrateMbps.collectAsStateWithLifecycle()
+    val isMediaGalleryOpen by viewModel.isMediaGalleryOpen.collectAsStateWithLifecycle()
+    val isZipBrowserOpen by viewModel.isZipBrowserOpen.collectAsStateWithLifecycle()
+    val zipWarningMessage by viewModel.zipWarningMessage.collectAsStateWithLifecycle()
+    val validationBannerMessage by viewModel.validationBannerMessage.collectAsStateWithLifecycle()
 
     // ActivityResultLaunchers para seleção de arquivos
 
@@ -287,7 +293,7 @@ fun EditorScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     FilledTonalButton(
-                        onClick = { directImagesLauncher.launch("*/*") },
+                        onClick = { viewModel.openMediaGallery() },
                         modifier = Modifier
                             .weight(1f)
                             .testTag("import_images_button"),
@@ -299,7 +305,7 @@ fun EditorScreen(
                     }
 
                     OutlinedButton(
-                        onClick = { zipLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed")) },
+                        onClick = { viewModel.openZipBrowser() },
                         modifier = Modifier
                             .weight(1f)
                             .testTag("import_zip_button"),
@@ -319,8 +325,30 @@ fun EditorScreen(
                     ) {
                         Icon(imageVector = Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Sortear", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Aleatoriamente", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
+                }
+            }
+
+            if (zipWarningMessage != null || validationBannerMessage != null) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                        .testTag("editor_five_second_warning_banner")
+                ) {
+                    Text(
+                        text = zipWarningMessage ?: validationBannerMessage ?: "",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
                 }
             }
 
@@ -357,13 +385,14 @@ fun EditorScreen(
                 images = images,
                 currentImageIndex = currentImageIndex,
                 onSelectImage = { viewModel.setImageIndex(it) },
+                onDeleteImage = { viewModel.deleteImage(it) },
                 selectedMovement = selectedMovement,
                 selectedTransition = selectedTransition,
                 onSelectTransition = {
                     viewModel.selectTransition(it)
                 },
                 isPlaying = isTestPlaying,
-                onAddMediaClick = { directImagesLauncher.launch("image/*") },
+                onAddMediaClick = { viewModel.openMediaGallery() },
                 modifier = Modifier.padding(horizontal = 14.dp)
             )
 
@@ -631,6 +660,26 @@ fun EditorScreen(
         renderingState = renderingState,
         onCancel = { viewModel.cancelRendering(context) },
         onMinimize = { viewModel.closeProgressModal() }
+    )
+
+    // Galeria Exclusiva do Próprio App (exibe apenas mídias de imagens e vídeos para incluir no projeto)
+    AppMediaGalleryDialog(
+        isOpen = isMediaGalleryOpen,
+        onDismiss = { viewModel.closeMediaGallery() },
+        onConfirmSelection = { selectedUris ->
+            viewModel.importDirectImages(context, selectedUris)
+        }
+    )
+
+    // Espaço do Próprio App para Seleção de Arquivos ZIP no Dispositivo
+    AppZipBrowserDialog(
+        isOpen = isZipBrowserOpen,
+        zipWarningMessage = zipWarningMessage,
+        onClearZipWarning = { viewModel.clearZipWarning() },
+        onDismiss = { viewModel.closeZipBrowser() },
+        onSelectZipUri = { selectedZipUri ->
+            viewModel.importZipFile(context, selectedZipUri)
+        }
     )
 }
 

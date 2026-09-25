@@ -5,6 +5,7 @@ import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.util.zip.ZipEntry
@@ -17,12 +18,16 @@ sealed class ZipExtractResult {
 
 object ZipExtractor {
 
-    private val ALLOWED_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
+    private val ALLOWED_EXTENSIONS = setOf(
+        "jpg", "jpeg", "png", "webp", "bmp", "heic",
+        "mp4", "mov", "mkv", "webm", "3gp", "avi"
+    )
+
+    const val UNSUPPORTED_ZIP_MESSAGE = "Formato não suportado"
 
     /**
-     * Extrai imagens de um arquivo ZIP mantendo a ordem alfabética/numérica original.
-     * Se contiver arquivos não permitidos ou zero imagens, retorna erro estrito conforme especificação:
-     * "Arquivo ZIP inválido ou sem imagens suportadas."
+     * Extrai mídias de imagens e vídeos de um arquivo ZIP mantendo a ordem alfabética/numérica original.
+     * Se não contiver mídias de vídeos/imagens suportadas, retorna "Formato não suportado".
      */
     suspend fun extractZip(
         context: Context,
@@ -33,18 +38,21 @@ object ZipExtractor {
             mkdirs()
         }
 
-        // Leitura inicial para verificação de integridade e conteúdo
         val inputStream: InputStream? = try {
-            context.contentResolver.openInputStream(zipUri)
+            if (zipUri.scheme == "file") {
+                val file = File(zipUri.path ?: "")
+                if (file.exists()) FileInputStream(file) else null
+            } else {
+                context.contentResolver.openInputStream(zipUri)
+            }
         } catch (e: Exception) {
-            return@withContext ZipExtractResult.Error("Arquivo ZIP inválido ou sem imagens suportadas.")
+            return@withContext ZipExtractResult.Error(UNSUPPORTED_ZIP_MESSAGE)
         }
 
         if (inputStream == null) {
-            return@withContext ZipExtractResult.Error("Arquivo ZIP inválido ou sem imagens suportadas.")
+            return@withContext ZipExtractResult.Error(UNSUPPORTED_ZIP_MESSAGE)
         }
 
-        // Buffer temporário em memória / temp dir para validação
         val tempDir = File(context.cacheDir, "zip_temp_${System.currentTimeMillis()}").apply {
             mkdirs()
         }
@@ -56,16 +64,14 @@ object ZipExtractor {
                 while (entry != null) {
                     if (!entry.isDirectory) {
                         val name = File(entry.name).name
-                        // Ignora arquivos de sistema do macOS (__MACOSX, .DS_Store)
+                        // Ignora arquivos ocultos de sistema (__MACOSX, .DS_Store)
                         if (!name.startsWith(".") && !entry.name.contains("__MACOSX")) {
                             val ext = name.substringAfterLast('.', "").lowercase()
-                            // Se contiver arquivos não permitidos
                             if (ext !in ALLOWED_EXTENSIONS) {
                                 tempDir.deleteRecursively()
-                                return@withContext ZipExtractResult.Error("Arquivo ZIP inválido ou sem imagens suportadas.")
+                                return@withContext ZipExtractResult.Error(UNSUPPORTED_ZIP_MESSAGE)
                             }
 
-                            // Extrai temporariamente para validação
                             val tempFile = File(tempDir, name)
                             FileOutputStream(tempFile).use { fos ->
                                 zis.copyTo(fos)
@@ -80,7 +86,7 @@ object ZipExtractor {
 
             if (entries.isEmpty()) {
                 tempDir.deleteRecursively()
-                return@withContext ZipExtractResult.Error("Arquivo ZIP inválido ou sem imagens suportadas.")
+                return@withContext ZipExtractResult.Error(UNSUPPORTED_ZIP_MESSAGE)
             }
 
             // Ordenação estrita alfabética / numérica natural
@@ -89,7 +95,8 @@ object ZipExtractor {
             val finalFiles = mutableListOf<Pair<String, String>>()
             sortedEntries.forEachIndexed { index, fileName ->
                 val srcFile = File(tempDir, fileName)
-                val targetFile = File(destFolder, "img_${System.currentTimeMillis()}_${index + 1}_$fileName")
+                val prefix = if (MediaHelper.isVideo(fileName)) "vid" else "img"
+                val targetFile = File(destFolder, "${prefix}_${System.currentTimeMillis()}_${index + 1}_$fileName")
                 srcFile.copyTo(targetFile, overwrite = true)
                 finalFiles.add(Pair(targetFile.absolutePath, fileName))
             }
@@ -98,7 +105,7 @@ object ZipExtractor {
             ZipExtractResult.Success(finalFiles)
         } catch (e: Exception) {
             tempDir.deleteRecursively()
-            ZipExtractResult.Error("Arquivo ZIP inválido ou sem imagens suportadas.")
+            ZipExtractResult.Error(UNSUPPORTED_ZIP_MESSAGE)
         }
     }
 

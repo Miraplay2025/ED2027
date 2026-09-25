@@ -15,7 +15,7 @@ import kotlin.math.sin
  * 4: Tilt Down
  * 5: Zoom In / Dolly In
  * 6: Zoom Out / Dolly Out
- * 7: Rotate & Zoom In (CapCut)
+ * 7: Rotate & Zoom In
  * 8: Diagonal Pan
  * 9: Pulse Zoom (Ease Out)
  * 10: Horizontal Shake & Pan
@@ -522,7 +522,7 @@ data class MovementEffect(
             MovementEffect(4, "Tilt Down", "Deslocamento vertical de cima para baixo.", "4 • Tilt Down"),
             MovementEffect(5, "Zoom In / Dolly In", "Aproximação contínua em direção ao centro da imagem.", "5 • Zoom In"),
             MovementEffect(6, "Zoom Out / Dolly Out", "Afastamento suave a partir do centro, revelando a cena.", "6 • Zoom Out"),
-            MovementEffect(7, "Rotate & Zoom In", "Animação estilo CapCut: Rotação leve com zoom contínuo.", "7 • CapCut"),
+            MovementEffect(7, "Rotate & Zoom In", "Animação profissional: Rotação leve com zoom contínuo.", "7 • Rotate Zoom"),
             MovementEffect(8, "Diagonal Pan", "Movimento suave em diagonal da ponta superior à inferior.", "8 • Diagonal"),
             MovementEffect(9, "Pulse Zoom", "Aproximação rápida no centro com suave desaceleração.", "9 • Pulse"),
             MovementEffect(10, "Horizontal Shake & Pan", "Movimento pan dinâmico com micro-estabilização de ação.", "10 • Dynamic"),

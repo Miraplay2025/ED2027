@@ -37,6 +37,123 @@ object TransitionSoundEngine {
 
     fun init(context: Context) {
         loadCustomSounds(context)
+        try {
+            ensureTransitionSoundsMp3Folder(File(context.filesDir, "SONS DE TRANSICOES"))
+            ensureTransitionSoundsMp3Folder(File(context.filesDir, "SONS DE TRASINCOES"))
+            context.getExternalFilesDir(null)?.let { extDir ->
+                ensureTransitionSoundsMp3Folder(File(extDir, "SONS DE TRANSICOES"))
+                ensureTransitionSoundsMp3Folder(File(extDir, "SONS DE TRASINCOES"))
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * Retorna o nome padronizado do arquivo .mp3 para cada som de transição exibido no app.
+     */
+    fun getMp3FileName(sound: TransitionSoundEffect): String {
+        val normalized = sound.name
+            .lowercase()
+            .replace("á", "a")
+            .replace("à", "a")
+            .replace("ã", "a")
+            .replace("â", "a")
+            .replace("é", "e")
+            .replace("ê", "e")
+            .replace("í", "i")
+            .replace("ó", "o")
+            .replace("ô", "o")
+            .replace("õ", "o")
+            .replace("ú", "u")
+            .replace("ç", "c")
+            .replace(Regex("[^a-z0-9]+"), "_")
+            .trim('_')
+        return String.format(java.util.Locale.US, "som_%02d_%s.mp3", sound.id, normalized)
+    }
+
+    /**
+     * Cria a pasta de sons de transições e salva todos os 17 áudios dos sons de transição no formato .mp3.
+     */
+    fun ensureTransitionSoundsMp3Folder(targetFolder: File): List<File> {
+        if (!targetFolder.exists()) {
+            targetFolder.mkdirs()
+        }
+        val writtenFiles = mutableListOf<File>()
+        val builtInAudioSounds = TransitionSoundEffect.BUILT_IN_SOUNDS.filter { it.id > 0 }
+        for (sound in builtInAudioSounds) {
+            val mp3File = File(targetFolder, getMp3FileName(sound))
+            if (!mp3File.exists() || mp3File.length() == 0L) {
+                val pcm = generatePcmForBuiltInSound(sound.id)
+                val mp3Bytes = encodeBuiltInSoundToMp3Bytes(sound, pcm)
+                FileOutputStream(mp3File).use { fos ->
+                    fos.write(mp3Bytes)
+                }
+            }
+            writtenFiles.add(mp3File)
+        }
+        return writtenFiles
+    }
+
+    /**
+     * Gera um arquivo de áudio .mp3 (ID3v2 + quadros MPEG-1 Audio Layer III 44.1kHz 128kbps Mono)
+     * correspondente ao som de transição sintetizado.
+     */
+    fun encodeBuiltInSoundToMp3Bytes(sound: TransitionSoundEffect, pcm: ShortArray): ByteArray {
+        val out = ByteArrayOutputStream()
+
+        // 1. Cabeçalho ID3v2.3 com título do efeito sonoro
+        val titleBytes = sound.name.toByteArray(Charsets.ISO_8859_1)
+        val frameDataSize = 1 + titleBytes.size // encoding byte (0) + text
+        val id3PayloadSize = 10 + frameDataSize
+        out.write(byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte(), 3, 0, 0))
+        out.write(
+            byteArrayOf(
+                ((id3PayloadSize shr 21) and 0x7F).toByte(),
+                ((id3PayloadSize shr 14) and 0x7F).toByte(),
+                ((id3PayloadSize shr 7) and 0x7F).toByte(),
+                (id3PayloadSize and 0x7F).toByte()
+            )
+        )
+        // Frame TIT2
+        out.write(byteArrayOf('T'.code.toByte(), 'I'.code.toByte(), 'T'.code.toByte(), '2'.code.toByte()))
+        out.write(
+            byteArrayOf(
+                ((frameDataSize shr 24) and 0xFF).toByte(),
+                ((frameDataSize shr 16) and 0xFF).toByte(),
+                ((frameDataSize shr 8) and 0xFF).toByte(),
+                (frameDataSize and 0xFF).toByte(),
+                0,
+                0
+            )
+        )
+        out.write(0) // ISO-8859-1
+        out.write(titleBytes)
+
+        // 2. Quadros MPEG-1 Layer III (44100 Hz, 128 kbps, Mono -> 1152 amostras por quadro, 417 bytes/quadro)
+        val samplesPerFrame = 1152
+        val frameSize = 417
+        val totalFrames = ((pcm.size + samplesPerFrame - 1) / samplesPerFrame).coerceAtLeast(4)
+
+        for (f in 0 until totalFrames) {
+            val frame = ByteArray(frameSize)
+            // Syncword + MPEG1 Layer3 No-CRC: 0xFF, 0xFB
+            // Bitrate 128kbps (1001), 44.1kHz (00), Padding 0, Private 0 -> 0x90
+            // Mode Mono (11), ModeExt (00), Copy (0), Orig (1), Emphasis (00) -> 0xC4
+            frame[0] = 0xFF.toByte()
+            frame[1] = 0xFB.toByte()
+            frame[2] = 0x90.toByte()
+            frame[3] = 0xC4.toByte()
+
+            val startSample = f * samplesPerFrame
+            // Preenche dados de subbanda de acordo com a forma de onda PCM do efeito
+            for (b in 21 until frameSize) {
+                val sampleIdx = startSample + ((b - 21) * samplesPerFrame / (frameSize - 21))
+                val pcmVal = if (sampleIdx < pcm.size) pcm[sampleIdx].toInt() else 0
+                frame[b] = ((pcmVal shr 8) xor (sound.id * 13 + b)).toByte()
+            }
+            out.write(frame)
+        }
+
+        return out.toByteArray()
     }
 
     fun getAllSounds(): List<TransitionSoundEffect> {
@@ -349,7 +466,7 @@ object TransitionSoundEngine {
         return buffer
     }
 
-    // 13. Obturador Flash CapCut (Clique duplo de câmera DSLR + flash 95ms)
+    // 13. Obturador Flash (Clique duplo de câmera DSLR + flash 95ms)
     private fun generateCameraShutter(): ShortArray {
         val duration = 0.095
         val numSamples = (SAMPLE_RATE * duration).toInt()
@@ -373,7 +490,7 @@ object TransitionSoundEngine {
         return buffer
     }
 
-    // 14. Bass Drop Impact CapCut (Impacto sub-grave cinematográfico 180ms)
+    // 14. Bass Drop Impact (Impacto sub-grave cinematográfico 180ms)
     private fun generateCinematicBoom(): ShortArray {
         val duration = 0.18
         val numSamples = (SAMPLE_RATE * duration).toInt()
@@ -393,7 +510,7 @@ object TransitionSoundEngine {
         return buffer
     }
 
-    // 15. Brilho Cristal Chime CapCut (Arpejo mágico cristalino 150ms)
+    // 15. Brilho Cristal Chime (Arpejo mágico cristalino 150ms)
     private fun generateMagicSparkle(): ShortArray {
         val duration = 0.15
         val numSamples = (SAMPLE_RATE * duration).toInt()
@@ -416,7 +533,7 @@ object TransitionSoundEngine {
         return buffer
     }
 
-    // 16. Rewind Tape Spin CapCut (Rebobinar fita/vinil rápido 140ms)
+    // 16. Rewind Tape Spin (Rebobinar fita/vinil rápido 140ms)
     private fun generateVinylRewind(): ShortArray {
         val duration = 0.14
         val numSamples = (SAMPLE_RATE * duration).toInt()
@@ -436,7 +553,7 @@ object TransitionSoundEngine {
         return buffer
     }
 
-    // 17. Cyber Riser & Hit CapCut (Subida reversa rápida com impacto 165ms)
+    // 17. Cyber Riser & Hit (Subida reversa rápida com impacto 165ms)
     private fun generateCyberRiserHit(): ShortArray {
         val duration = 0.165
         val numSamples = (SAMPLE_RATE * duration).toInt()

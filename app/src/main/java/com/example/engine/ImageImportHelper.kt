@@ -60,8 +60,9 @@ object ImageImportHelper {
         val result = mutableListOf<Pair<String, String>>()
 
         for (uri in uris) {
-            val mimeType = context.contentResolver.getType(uri)?.lowercase()
-            val fileName = getFileName(context, uri)
+            val isFileUri = uri.scheme == "file"
+            val mimeType = if (isFileUri) null else context.contentResolver.getType(uri)?.lowercase()
+            val fileName = if (isFileUri) File(uri.path ?: "").name else getFileName(context, uri)
             val ext = fileName.substringAfterLast('.', "").lowercase()
 
             val isValidMime = mimeType != null && (
@@ -72,7 +73,7 @@ object ImageImportHelper {
             val isValidExt = ext in ALLOWED_EXTENSIONS
 
             if (!isValidMime && !isValidExt) {
-                return@withContext ImageImportResult.Error("Arquivo inválido ($fileName). Selecione imagens ou vídeos suportados.")
+                return@withContext ImageImportResult.Error("Formato não suportado")
             }
 
             try {
@@ -81,9 +82,14 @@ object ImageImportHelper {
                     destFolder,
                     "${prefix}_${System.currentTimeMillis()}_${result.size + 1}_$fileName"
                 )
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    FileOutputStream(targetFile).use { output ->
-                        input.copyTo(output)
+                if (isFileUri) {
+                    val srcFile = File(uri.path ?: "")
+                    srcFile.copyTo(targetFile, overwrite = true)
+                } else {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(targetFile).use { output ->
+                            input.copyTo(output)
+                        }
                     }
                 }
                 result.add(Pair(targetFile.absolutePath, fileName))

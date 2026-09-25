@@ -37,7 +37,8 @@ class SyntaxParserTest {
 
         assertTrue(result is SyntaxParseResult.Error)
         val error = (result as SyntaxParseResult.Error).message
-        assertTrue(error.contains("'s'"))
+        assertTrue(error.contains("terminar com s"))
+        assertTrue(error.trim().split(Regex("\\s+")).size <= 6)
     }
 
     @Test
@@ -47,7 +48,8 @@ class SyntaxParserTest {
 
         assertTrue(result is SyntaxParseResult.Error)
         val error = (result as SyntaxParseResult.Error).message
-        assertTrue(error.contains("0 a 26"))
+        assertTrue(error.contains("inexistente"))
+        assertTrue(error.trim().split(Regex("\\s+")).size <= 6)
     }
 
     @Test
@@ -57,7 +59,8 @@ class SyntaxParserTest {
 
         assertTrue(result is SyntaxParseResult.Error)
         val error = (result as SyntaxParseResult.Error).message
-        assertTrue(error.contains("não existe no projeto"))
+        assertTrue(error.contains("não existe"))
+        assertTrue(error.trim().split(Regex("\\s+")).size <= 6)
     }
 
     @Test
@@ -67,7 +70,8 @@ class SyntaxParserTest {
 
         assertTrue(result is SyntaxParseResult.Error)
         val error = (result as SyntaxParseResult.Error).message
-        assertTrue(error.contains("Cobertura Total"))
+        assertTrue(error.contains("foram configuradas"))
+        assertTrue(error.trim().split(Regex("\\s+")).size <= 6)
     }
 
     @Test
@@ -86,6 +90,7 @@ class SyntaxParserTest {
         assertTrue(result is com.example.engine.TransitionValidationResult.Error)
         val error = (result as com.example.engine.TransitionValidationResult.Error).message
         assertTrue(error.contains("20"))
+        assertTrue(error.trim().split(Regex("\\s+")).size <= 6)
     }
 
     @Test
@@ -93,6 +98,8 @@ class SyntaxParserTest {
         val input = "1, abc, 5"
         val result = SyntaxParser.validateTransitionIds(input)
         assertTrue(result is com.example.engine.TransitionValidationResult.Error)
+        val error = (result as com.example.engine.TransitionValidationResult.Error).message
+        assertTrue(error.trim().split(Regex("\\s+")).size <= 6)
     }
 
     @Test
@@ -110,10 +117,10 @@ class SyntaxParserTest {
         val configs = (parseResult as SyntaxParseResult.Success).configs
         assertEquals(imageCount, configs.size)
 
-        // Verifica limites de movimento (0-26) e duração (5.0s-10.0s)
+        // Verifica limites de movimento (0-26) e duração (no máximo 12.0s)
         for (cfg in configs) {
             assertTrue("Movimento deve estar entre 0 e 26", cfg.movementId in 0..26)
-            assertTrue("Duração deve estar entre 5.0 e 10.0s", cfg.durationSeconds in 5.0f..10.01f)
+            assertTrue("Duração deve ser no máximo 12.0s", cfg.durationSeconds in 3.0f..12.01f)
         }
 
         // Valida que as transições geradas passam na validação
@@ -122,7 +129,7 @@ class SyntaxParserTest {
     }
 
     @Test
-    fun testBuiltInTransitionSoundsIncludes5NewCapCutSounds() {
+    fun testBuiltInTransitionSoundsAndMp3FolderExport() {
         // 0 (Sem Som) + 17 sons embutidos = 18 itens no catálogo padrão
         assertEquals(18, com.example.data.model.TransitionSoundEffect.BUILT_IN_SOUNDS.size)
         for (id in 13..17) {
@@ -135,6 +142,23 @@ class SyntaxParserTest {
         assertTrue(validNewSounds is com.example.engine.TransitionSoundValidationResult.Success)
         val ids = (validNewSounds as com.example.engine.TransitionSoundValidationResult.Success).soundIds
         assertEquals(listOf(13, 14, 15, 16, 17), ids)
+
+        // Cria e salva na pasta SONS DE TRANSICOES / SONS DE TRASINCOES do projeto todos os 17 áudios em formato .mp3
+        val projectRootFolder1 = java.io.File("../SONS DE TRANSICOES")
+        val projectRootFolder2 = java.io.File("../SONS DE TRASINCOES")
+        val assetsFolder1 = java.io.File("src/main/assets/SONS DE TRANSICOES")
+        val assetsFolder2 = java.io.File("src/main/assets/SONS DE TRASINCOES")
+
+        val files1 = com.example.engine.TransitionSoundEngine.ensureTransitionSoundsMp3Folder(projectRootFolder1)
+        val files2 = com.example.engine.TransitionSoundEngine.ensureTransitionSoundsMp3Folder(projectRootFolder2)
+        val files3 = com.example.engine.TransitionSoundEngine.ensureTransitionSoundsMp3Folder(assetsFolder1)
+        val files4 = com.example.engine.TransitionSoundEngine.ensureTransitionSoundsMp3Folder(assetsFolder2)
+
+        assertEquals(17, files1.size)
+        assertEquals(17, files2.size)
+        assertEquals(17, files3.size)
+        assertEquals(17, files4.size)
+        assertTrue(files1.all { it.exists() && it.name.endsWith(".mp3") && it.length() > 100L })
     }
 }
 

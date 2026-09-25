@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import android.content.Context
 import com.example.data.dao.ProjectDao
+import com.example.data.local.AppPreferences
 import com.example.data.model.Project
 import com.example.data.model.ProjectImage
 import kotlinx.coroutines.Dispatchers
@@ -22,11 +23,13 @@ class ProjectRepository(
     }
 
     suspend fun createProject(name: String): Long = withContext(Dispatchers.IO) {
+        val defaultOrRecentDir = AppPreferences.getInstance(context).getDefaultOutputDirUri()
         val project = Project(
             name = name.ifBlank { "Novo Projeto" },
             createdAt = System.currentTimeMillis(),
             imageCount = 0,
-            syntaxConfig = ""
+            syntaxConfig = "",
+            customOutputDirUri = defaultOrRecentDir
         )
         projectDao.insertProject(project)
     }

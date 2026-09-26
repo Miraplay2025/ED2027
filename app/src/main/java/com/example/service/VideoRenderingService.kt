@@ -22,12 +22,18 @@ import com.example.data.db.AppDatabase
 import com.example.data.local.AppPreferences
 import com.example.data.model.MovementEffect
 import com.example.data.model.ParsedAnimationConfig
+import com.example.data.model.ParsedSubtitleItem
+import com.example.data.model.SubtitleStyle
 import com.example.data.model.TransitionEffect
 import com.example.engine.CtaRenderOverlayConfig
 import com.example.engine.CtaVideoEngine
 import com.example.engine.LogoRenderOverlayConfig
 import com.example.engine.RenderSequenceItem
 import com.example.engine.RenderingManager
+import com.example.engine.Stage2SubtitleCheckResult
+import com.example.engine.Stage2UserDecision
+import com.example.engine.SubtitleEngine
+import com.example.engine.SubtitleValidationResult
 import com.example.engine.VideoEncoder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -120,6 +126,11 @@ class VideoRenderingService : Service() {
         val logoNormY = intent.getFloatExtra(EXTRA_LOGO_NORM_Y, 0.16f)
         val logoScale = intent.getFloatExtra(EXTRA_LOGO_SCALE, 0.18f)
 
+        val isSubtitlesEnabled = intent.getBooleanExtra(EXTRA_SUBTITLES_ENABLED, false)
+        val subtitlesText = intent.getStringExtra(EXTRA_SUBTITLES_TEXT) ?: ""
+        val subtitleStyleId = intent.getIntExtra(EXTRA_SUBTITLE_STYLE_ID, 1)
+        val timelineAudioPath = intent.getStringExtra(EXTRA_TIMELINE_AUDIO_PATH)
+
         if (projectId == -1L || configs.isNullOrEmpty()) {
             stopSelf()
             return START_NOT_STICKY
@@ -130,7 +141,7 @@ class VideoRenderingService : Service() {
         CtaVideoEngine.init(applicationContext)
 
         isNotificationHiddenByUser = false
-        startForeground(NOTIFICATION_ID, buildNotification("Iniciando renderização de vídeo unificado...", 0, configs.size, 0))
+        startForeground(NOTIFICATION_ID, buildNotification("Iniciando Etapa 1: Renderização do vídeo...", 0, configs.size, 0))
 
         serviceScope.launch {
             processBatch(
@@ -153,7 +164,11 @@ class VideoRenderingService : Service() {
                 logoFilePath = logoFilePath,
                 logoNormX = logoNormX,
                 logoNormY = logoNormY,
-                logoScale = logoScale
+                logoScale = logoScale,
+                isSubtitlesEnabled = isSubtitlesEnabled,
+                subtitlesText = subtitlesText,
+                subtitleStyleId = subtitleStyleId,
+                timelineAudioPath = timelineAudioPath
             )
         }
 
@@ -180,7 +195,11 @@ class VideoRenderingService : Service() {
         logoFilePath: String? = null,
         logoNormX: Float = 0.84f,
         logoNormY: Float = 0.16f,
-        logoScale: Float = 0.18f
+        logoScale: Float = 0.18f,
+        isSubtitlesEnabled: Boolean = false,
+        subtitlesText: String = "",
+        subtitleStyleId: Int = 1,
+        timelineAudioPath: String? = null
     ) {
         val totalImages = configs.size
         RenderingManager.startBatch(totalImages)
@@ -283,11 +302,19 @@ class VideoRenderingService : Service() {
             } else null
         } else null
 
-        val tempOutputFile = File(cacheDir, "video_unificado_${System.currentTimeMillis()}.mp4")
+        val timelineAudioFile: File? = if (!timelineAudioPath.isNullOrBlank()) {
+            val af = File(timelineAudioPath)
+            if (af.exists() && af.length() > 0L) {
+                RenderingManager.log("Áudio da Linha do Tempo incluído: ${af.name}")
+                af
+            } else null
+        } else null
 
-        val success = VideoEncoder.encodeUnifiedSequenceToVideo(
+        val stage1VideoFile = File(cacheDir, "video_etapa1_${System.currentTimeMillis()}.mp4")
+
+        val stage1Success = VideoEncoder.encodeUnifiedSequenceToVideo(
             sequence = sequenceItems,
-            outputFile = tempOutputFile,
+            outputFile = stage1VideoFile,
             targetWidth = videoWidth,
             targetHeight = videoHeight,
             frameRate = videoFps,
@@ -295,44 +322,237 @@ class VideoRenderingService : Service() {
             transitionDurationSeconds = transitionDurationSeconds,
             ctaOverlay = ctaOverlayConfig,
             logoOverlay = logoOverlayConfig,
+            subtitles = emptyList(),
+            subtitleStyle = SubtitleStyle.NO_SUBTITLE,
+            timelineAudioFile = timelineAudioFile,
             onGlobalProgress = { currentFrame, totalFrames, currentImgIndex, statusText ->
-                val overallPercent = ((currentFrame.toFloat() / totalFrames) * 100).toInt().coerceIn(0, 100)
+                val rawPercent = ((currentFrame.toFloat() / totalFrames) * 100).toInt().coerceIn(0, 100)
+                val displayPercent = if (isSubtitlesEnabled) (rawPercent * 0.65f).toInt().coerceIn(0, 65) else rawPercent
                 updateNotification(
-                    "Exportando vídeo único ($overallPercent%)",
+                    "Etapa 1: Renderizando vídeo ($displayPercent%)",
                     currentImgIndex + 1,
                     sequenceItems.size,
-                    overallPercent
+                    displayPercent
                 )
                 RenderingManager.updateProgress(
                     currentImageIndex = currentImgIndex + 1,
                     totalImages = sequenceItems.size,
-                    currentMovementName = statusText,
-                    overallPercent = overallPercent
+                    currentMovementName = "Etapa 1 • $statusText",
+                    overallPercent = displayPercent
                 )
             },
             isCancelled = { RenderingManager.isCancelRequested }
         )
 
-        if (success && tempOutputFile.exists() && tempOutputFile.length() > 0) {
+        if (!stage1Success || !stage1VideoFile.exists() || stage1VideoFile.length() == 0L) {
+            if (RenderingManager.isCancelRequested) {
+                RenderingManager.log("Renderização cancelada pelo usuário.")
+                updateNotification("Renderização cancelada", 0, totalImages, 100)
+            } else {
+                RenderingManager.log("Falha na Etapa 1 de renderização do vídeo.")
+            }
+            stage1VideoFile.delete()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return
+        }
+
+        // =========================================================================
+        // CASO O USUÁRIO NÃO ATIVOU AS LEGENDAS: SALVA LOGO O VÍDEO NO DISPOSITIVO
+        // =========================================================================
+        if (!isSubtitlesEnabled) {
             val fileName = "video_completo_animado_${System.currentTimeMillis()}.mp4"
             val savedLocation = saveVideoToDestination(
-                tempFile = tempOutputFile,
+                tempFile = stage1VideoFile,
                 fileName = fileName,
                 customOutputDirUri = effectiveOutputDirUri,
                 defaultDir = defaultOutputDir
             )
-
             RenderingManager.addOutputFile(savedLocation)
             RenderingManager.log("VÍDEO ÚNICO FINAL gerado com sucesso!")
             RenderingManager.log("Salvo em: $savedLocation")
-            tempOutputFile.delete()
+            stage1VideoFile.delete()
         } else {
-            if (RenderingManager.isCancelRequested) {
-                RenderingManager.log("Renderização cancelada pelo usuário.")
-            } else {
-                RenderingManager.log("Falha na renderização do vídeo único.")
+            // =========================================================================
+            // ETAPA 2 (LEGENDAS ATIVADAS):
+            // 1. Ainda NÃO salva o vídeo no dispositivo.
+            // 2. Obtém a duração completa do vídeo final criado na Etapa 1.
+            // 3. Verifica se no campo de legendas existe alguma legenda com tempo inexistente no vídeo criado.
+            // 4. Se existir tempo inexistente: dá PAUSA e avisa o usuário para corrigir e clicar em CONTINUAR,
+            //    ou escolher "IGNORAR LEGENDAS" (salva logo sem legendas) ou "APLICAR MESMO ASSIM" (aplica só nos tempos validados).
+            // =========================================================================
+            val createdVideoDurationSec = VideoEncoder.probeCreatedVideoDurationSeconds(
+                videoFile = stage1VideoFile,
+                fallbackDurationSec = totalVideoDurationSec
+            )
+            val durationFormatted = SubtitleEngine.formatSecondsToMmSs(createdVideoDurationSec)
+            RenderingManager.setStage(2, "Etapa 2: Verificando legendas na duração do vídeo ($durationFormatted)...")
+            RenderingManager.log("Etapa 1 concluída. Duração total do vídeo criado: $durationFormatted (${String.format(java.util.Locale.US, "%.1fs", createdVideoDurationSec)}). Iniciando Etapa 2 (Legendas)...")
+
+            var currentSubtitlesInput = subtitlesText
+            var subtitlesToRender: List<ParsedSubtitleItem>? = null
+            var shouldIgnoreSubtitles = false
+
+            while (subtitlesToRender == null && !shouldIgnoreSubtitles && !RenderingManager.isCancelRequested) {
+                when (val parseRes = SubtitleEngine.parseAndValidateSubtitles(currentSubtitlesInput)) {
+                    is SubtitleValidationResult.Error -> {
+                        updateNotification(
+                            "Pausa na Etapa 2: Corrija as legendas para continuar",
+                            sequenceItems.size,
+                            sequenceItems.size,
+                            65
+                        )
+                        val decision = RenderingManager.pauseAndAwaitStage2SubtitleDecision(
+                            warningMessage = "Formato ou tempo duplicado nas legendas (${parseRes.message}). Corrija e clique em Continuar:",
+                            invalidTimesLabel = parseRes.faultyPart,
+                            videoDurationFormatted = durationFormatted,
+                            currentSubtitlesText = currentSubtitlesInput,
+                            correctionError = parseRes.message
+                        )
+                        when (decision) {
+                            is Stage2UserDecision.IgnoreSubtitles -> {
+                                shouldIgnoreSubtitles = true
+                            }
+                            is Stage2UserDecision.ApplyAnywayValidOnly -> {
+                                shouldIgnoreSubtitles = true
+                            }
+                            is Stage2UserDecision.RetryWithCorrectedSubtitles -> {
+                                currentSubtitlesInput = decision.correctedText
+                            }
+                        }
+                    }
+                    is SubtitleValidationResult.Success -> {
+                        when (val stage2Check = SubtitleEngine.checkSubtitlesInFinalVideoDuration(
+                            subtitles = parseRes.items,
+                            videoDurationSeconds = createdVideoDurationSec
+                        )) {
+                            is Stage2SubtitleCheckResult.AllValid -> {
+                                subtitlesToRender = stage2Check.validSubtitles
+                            }
+                            is Stage2SubtitleCheckResult.HasInvalidTimes -> {
+                                updateNotification(
+                                    "Pausa na Etapa 2: Tempo de legenda inexistente no vídeo ($durationFormatted)",
+                                    sequenceItems.size,
+                                    sequenceItems.size,
+                                    65
+                                )
+                                val warningMsg = "O vídeo final possui duração de $durationFormatted, mas a(s) legenda(s) [${stage2Check.invalidTimesLabel}] possuem tempo inexistente no vídeo. Corrija abaixo e clique em Continuar, ou escolha uma opção:"
+                                val decision = RenderingManager.pauseAndAwaitStage2SubtitleDecision(
+                                    warningMessage = warningMsg,
+                                    invalidTimesLabel = stage2Check.invalidTimesLabel,
+                                    videoDurationFormatted = durationFormatted,
+                                    currentSubtitlesText = currentSubtitlesInput,
+                                    correctionError = null
+                                )
+                                when (decision) {
+                                    is Stage2UserDecision.IgnoreSubtitles -> {
+                                        RenderingManager.log("Usuário selecionou 'Ignorar Legendas'. Salvando vídeo final sem legendas...")
+                                        shouldIgnoreSubtitles = true
+                                    }
+                                    is Stage2UserDecision.ApplyAnywayValidOnly -> {
+                                        RenderingManager.log("Usuário selecionou 'Aplicar Mesmo Assim'. Ignorando tempos inexistentes e aplicando ${stage2Check.validSubtitles.size} legenda(s) validada(s)...")
+                                        if (stage2Check.validSubtitles.isEmpty()) {
+                                            shouldIgnoreSubtitles = true
+                                        } else {
+                                            subtitlesToRender = stage2Check.validSubtitles
+                                        }
+                                    }
+                                    is Stage2UserDecision.RetryWithCorrectedSubtitles -> {
+                                        RenderingManager.log("Verificando novamente os tempos das legendas corrigidos pelo usuário...")
+                                        currentSubtitlesInput = decision.correctedText
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            tempOutputFile.delete()
+
+            if (RenderingManager.isCancelRequested) {
+                stage1VideoFile.delete()
+                updateNotification("Renderização cancelada", 0, totalImages, 100)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return
+            }
+
+            if (shouldIgnoreSubtitles || subtitlesToRender.isNullOrEmpty()) {
+                val fileName = "video_completo_animado_${System.currentTimeMillis()}.mp4"
+                val savedLocation = saveVideoToDestination(
+                    tempFile = stage1VideoFile,
+                    fileName = fileName,
+                    customOutputDirUri = effectiveOutputDirUri,
+                    defaultDir = defaultOutputDir
+                )
+                RenderingManager.addOutputFile(savedLocation)
+                RenderingManager.log("Vídeo final salvo no dispositivo sem legendas: $savedLocation")
+                stage1VideoFile.delete()
+            } else {
+                // Etapa 2: Renderiza as legendas nos tempos específicos fornecidos no rodapé do vídeo final
+                // Se o usuário não selecionou nenhum modelo (ID 0), usa o Estilo Padrão (ID 1)
+                val effectiveSubtitleStyle = SubtitleStyle.getEffectiveRenderStyle(subtitleStyleId)
+                RenderingManager.log("Etapa 2: Renderizando ${subtitlesToRender.size} legenda(s) no rodapé com modelo '${effectiveSubtitleStyle.name}'...")
+
+                val stage2VideoFile = File(cacheDir, "video_etapa2_legendado_${System.currentTimeMillis()}.mp4")
+                val stage2Success = VideoEncoder.encodeUnifiedSequenceToVideo(
+                    sequence = sequenceItems,
+                    outputFile = stage2VideoFile,
+                    targetWidth = videoWidth,
+                    targetHeight = videoHeight,
+                    frameRate = videoFps,
+                    bitRate = videoBitrate,
+                    transitionDurationSeconds = transitionDurationSeconds,
+                    ctaOverlay = ctaOverlayConfig,
+                    logoOverlay = logoOverlayConfig,
+                    subtitles = subtitlesToRender,
+                    subtitleStyle = effectiveSubtitleStyle,
+                    timelineAudioFile = timelineAudioFile,
+                    onGlobalProgress = { currentFrame, totalFrames, currentImgIndex, _ ->
+                        val stage2Ratio = currentFrame.toFloat() / totalFrames.coerceAtLeast(1)
+                        val overallPercent = (65 + (stage2Ratio * 35f).toInt()).coerceIn(65, 100)
+                        updateNotification(
+                            "Etapa 2: Aplicando legendas no rodapé ($overallPercent%)",
+                            currentImgIndex + 1,
+                            sequenceItems.size,
+                            overallPercent
+                        )
+                        RenderingManager.updateProgress(
+                            currentImageIndex = currentImgIndex + 1,
+                            totalImages = sequenceItems.size,
+                            currentMovementName = "Etapa 2 • Legendas (${effectiveSubtitleStyle.name})",
+                            overallPercent = overallPercent
+                        )
+                    },
+                    isCancelled = { RenderingManager.isCancelRequested }
+                )
+
+                stage1VideoFile.delete()
+
+                if (stage2Success && stage2VideoFile.exists() && stage2VideoFile.length() > 0L) {
+                    val fileName = "video_completo_legendado_${System.currentTimeMillis()}.mp4"
+                    val savedLocation = saveVideoToDestination(
+                        tempFile = stage2VideoFile,
+                        fileName = fileName,
+                        customOutputDirUri = effectiveOutputDirUri,
+                        defaultDir = defaultOutputDir
+                    )
+                    RenderingManager.addOutputFile(savedLocation)
+                    RenderingManager.log("VÍDEO FINAL COM LEGENDAS gerado e salvo com sucesso!")
+                    RenderingManager.log("Salvo em: $savedLocation")
+                    stage2VideoFile.delete()
+                } else {
+                    stage2VideoFile.delete()
+                    if (RenderingManager.isCancelRequested) {
+                        RenderingManager.log("Renderização cancelada pelo usuário na Etapa 2.")
+                        updateNotification("Renderização cancelada", 0, totalImages, 100)
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                        return
+                    } else {
+                        RenderingManager.log("Falha na Etapa 2 ao aplicar legendas.")
+                    }
+                }
+            }
         }
 
         if (RenderingManager.isCancelRequested) {
@@ -603,6 +823,10 @@ class VideoRenderingService : Service() {
         const val EXTRA_LOGO_NORM_X = "extra_logo_norm_x"
         const val EXTRA_LOGO_NORM_Y = "extra_logo_norm_y"
         const val EXTRA_LOGO_SCALE = "extra_logo_scale"
+        const val EXTRA_SUBTITLES_ENABLED = "extra_subtitles_enabled"
+        const val EXTRA_SUBTITLES_TEXT = "extra_subtitles_text"
+        const val EXTRA_SUBTITLE_STYLE_ID = "extra_subtitle_style_id"
+        const val EXTRA_TIMELINE_AUDIO_PATH = "extra_timeline_audio_path"
 
         @Volatile
         var isAppInForeground: Boolean = false
@@ -648,7 +872,11 @@ class VideoRenderingService : Service() {
             logoFilePath: String? = null,
             logoNormX: Float = 0.84f,
             logoNormY: Float = 0.16f,
-            logoScale: Float = 0.18f
+            logoScale: Float = 0.18f,
+            isSubtitlesEnabled: Boolean = false,
+            subtitlesText: String = "",
+            subtitleStyleId: Int = 1,
+            timelineAudioPath: String? = null
         ) {
             val parcelList = ArrayList(configs.map {
                 RenderConfigParcel(it.imageIndex, it.movementId, it.durationSeconds)
@@ -675,6 +903,10 @@ class VideoRenderingService : Service() {
                 putExtra(EXTRA_LOGO_NORM_X, logoNormX)
                 putExtra(EXTRA_LOGO_NORM_Y, logoNormY)
                 putExtra(EXTRA_LOGO_SCALE, logoScale)
+                putExtra(EXTRA_SUBTITLES_ENABLED, isSubtitlesEnabled)
+                putExtra(EXTRA_SUBTITLES_TEXT, subtitlesText)
+                putExtra(EXTRA_SUBTITLE_STYLE_ID, subtitleStyleId)
+                putExtra(EXTRA_TIMELINE_AUDIO_PATH, timelineAudioPath)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)

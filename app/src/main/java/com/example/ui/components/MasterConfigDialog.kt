@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
@@ -56,6 +58,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -71,6 +75,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -83,12 +88,14 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.MovementEffect
 import com.example.data.model.Project
 import com.example.data.model.ProjectImage
+import com.example.data.model.SubtitleStyle
 import com.example.data.model.TransitionEffect
 import com.example.data.model.TransitionSoundEffect
 import com.example.data.model.VideoBitratePreset
 import com.example.data.model.VideoFps
 import com.example.data.model.VideoResolution
 import com.example.engine.RenderingState
+import com.example.engine.SubtitleEngine
 
 /**
  * Pop-up "Configurar Tudo" Central do Projeto:
@@ -126,6 +133,15 @@ fun MasterConfigDialog(
     onSyntaxChange: (String) -> Unit,
     onAutoGeneratePrompts: () -> Unit,
     onSaveAndValidateSyntax: () -> Boolean,
+    isSubtitlesEnabled: Boolean = false,
+    onSubtitlesEnabledChange: (Boolean) -> Unit = {},
+    subtitlesText: String = "",
+    subtitlesError: String? = null,
+    onSubtitlesTextChange: (String) -> Unit = {},
+    onValidateSubtitles: () -> Boolean = { true },
+    selectedSubtitleStyle: SubtitleStyle = SubtitleStyle.DEFAULT_STYLE,
+    onSelectSubtitleStyle: (SubtitleStyle) -> Unit = {},
+    initialTabIndex: Int = 0,
     renderingState: RenderingState,
     onStartRendering: () -> Boolean,
     onCancelRendering: () -> Unit,
@@ -134,13 +150,13 @@ fun MasterConfigDialog(
 ) {
     if (!isOpen) return
 
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val tabTitles = listOf("Transições", "Sons de Transições", "Qualidade", "Animação de Câmera", "Logs & Status")
+    var selectedTab by remember(initialTabIndex) { mutableIntStateOf(initialTabIndex) }
+    val tabTitles = listOf("Transições", "Sons de Transições", "Qualidade", "Animação de Câmera", "Legendas", "Logs & Status")
 
     // Estado temporário visível por 5 segundos quando houver erro ao clicar em Iniciar Renderização
     var visibleErrorText by remember { mutableStateOf<String?>(null) }
     var errorTriggerCount by remember { mutableIntStateOf(0) }
-    val activeValidationError = transitionError ?: transitionSoundError ?: syntaxError
+    val activeValidationError = transitionError ?: transitionSoundError ?: syntaxError ?: subtitlesError
 
     LaunchedEffect(activeValidationError, errorTriggerCount) {
         if (activeValidationError != null) {
@@ -311,7 +327,16 @@ fun MasterConfigDialog(
                             onAutoGeneratePrompts = onAutoGeneratePrompts,
                             onSaveAndValidate = { onSaveAndValidateSyntax() }
                         )
-                        4 -> LogsTabContent(
+                        4 -> SubtitlesTabContent(
+                            isSubtitlesEnabled = isSubtitlesEnabled,
+                            onSubtitlesEnabledChange = onSubtitlesEnabledChange,
+                            subtitlesText = subtitlesText,
+                            subtitlesError = subtitlesError,
+                            onSubtitlesTextChange = onSubtitlesTextChange,
+                            selectedSubtitleStyle = selectedSubtitleStyle,
+                            onSelectSubtitleStyle = onSelectSubtitleStyle
+                        )
+                        5 -> LogsTabContent(
                             renderingState = renderingState,
                             onCancelRendering = onCancelRendering
                         )
@@ -377,6 +402,7 @@ fun MasterConfigDialog(
                             val transOk = onValidateTransitions()
                             val soundOk = onValidateTransitionSounds()
                             val syntaxOk = onSaveAndValidateSyntax()
+                            val subtitlesOk = if (isSubtitlesEnabled) onValidateSubtitles() else true
                             if (!transOk) {
                                 errorTriggerCount++
                                 selectedTab = 0
@@ -386,10 +412,13 @@ fun MasterConfigDialog(
                             } else if (!syntaxOk) {
                                 errorTriggerCount++
                                 selectedTab = 3
+                            } else if (!subtitlesOk) {
+                                errorTriggerCount++
+                                selectedTab = 4
                             } else {
                                 val started = onStartRendering()
                                 if (started) {
-                                    selectedTab = 4 // Move para a aba de logs automaticamente após validar tudo
+                                    selectedTab = 5 // Move para a aba de logs automaticamente após validar tudo
                                 } else {
                                     errorTriggerCount++
                                 }
@@ -914,6 +943,201 @@ private fun SyntaxTabContent(
                         color = Color.Black,
                         fontWeight = FontWeight.Bold
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Aba de Legendas no Pop-up "Configurar Tudo":
+ * - O usuário pode ativar ou desativar as legendas se desejar.
+ * - Ao ativar, aparece por baixo o campo de 20vh onde fornece o tempo de início, texto da legenda e tempo final:
+ *   00:00 + EXEMPLO DE TEXTO DA LEGENDA = 00:13, 00:14 + EXEMPLO DE TEXTO DA LEGENDA = 00:20...
+ * - Possui exemplo placeholder que some automaticamente ao digitar no campo.
+ * - Valida tempos duplicados de início ou fim exibindo erro com no máximo 5 palavras na mesma linha.
+ * - Por baixo do campo disponibiliza 15 modelos de legendas super profissionais igual do CapCut
+ *   (1º modelo = Estilo Padrão + 14 modelos profissionais representados por imagem demonstrativa).
+ */
+@Composable
+private fun SubtitlesTabContent(
+    isSubtitlesEnabled: Boolean,
+    onSubtitlesEnabledChange: (Boolean) -> Unit,
+    subtitlesText: String,
+    subtitlesError: String?,
+    onSubtitlesTextChange: (String) -> Unit,
+    selectedSubtitleStyle: SubtitleStyle,
+    onSelectSubtitleStyle: (SubtitleStyle) -> Unit
+) {
+    val configuration = LocalConfiguration.current
+    val field20vhHeight = (configuration.screenHeightDp.dp * 0.20f).coerceIn(135.dp, 220.dp)
+    val effectiveSelectedModel = if (selectedSubtitleStyle.id == 0) SubtitleStyle.DEFAULT_STYLE else selectedSubtitleStyle
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("subtitles_tab_content")
+    ) {
+        Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1B2030)),
+            border = BorderStroke(1.dp, Color(0xFF2A3248))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp)
+            ) {
+                // Cabeçalho com chave de Ativar / Desativar Legendas
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Subtitles,
+                            contentDescription = null,
+                            tint = Color(0xFFFFEA00),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Ativar Legendas no Vídeo",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = Color.White
+                            )
+                            Text(
+                                text = if (isSubtitlesEnabled) {
+                                    "Ativado • Campo obrigatório para renderizar"
+                                } else {
+                                    "Desativado • Ative para configurar os tempos e textos"
+                                },
+                                fontSize = 10.sp,
+                                color = if (isSubtitlesEnabled) Color(0xFF00E676) else Color(0xFF94A3B8)
+                            )
+                        }
+                    }
+
+                    Switch(
+                        checked = isSubtitlesEnabled,
+                        onCheckedChange = onSubtitlesEnabledChange,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.Black,
+                            checkedTrackColor = Color(0xFFFFEA00),
+                            uncheckedThumbColor = Color(0xFF94A3B8),
+                            uncheckedTrackColor = Color(0xFF262E44)
+                        ),
+                        modifier = Modifier.testTag("subtitles_enable_switch")
+                    )
+                }
+
+                // Ao ativar as legendas, aparece por baixo o campo de 20vh + os 15 modelos CapCut
+                AnimatedVisibility(visible = isSubtitlesEnabled) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp)
+                    ) {
+                        Text(
+                            text = "Informe o tempo inicial, o texto da legenda e o tempo final separados por vírgula:",
+                            fontSize = 11.sp,
+                            color = Color(0xFFCBD5E1)
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Campo de 20vh com exemplo placeholder que some ao digitar
+                        OutlinedTextField(
+                            value = subtitlesText,
+                            onValueChange = onSubtitlesTextChange,
+                            placeholder = {
+                                Text(
+                                    text = SubtitleEngine.PLACEHOLDER_EXAMPLE,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color(0xFF64748B)
+                                )
+                            },
+                            isError = subtitlesError != null,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(field20vhHeight)
+                                .testTag("dialog_subtitles_input"),
+                            textStyle = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp,
+                                color = Color.White
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFFFFEA00),
+                                unfocusedBorderColor = Color(0xFF384360),
+                                errorBorderColor = Color(0xFFFF5252),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
+                        )
+
+                        // Erro de validação específico (no máximo 5 palavras na mesma linha)
+                        if (subtitlesError != null) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF3B1219),
+                                border = BorderStroke(1.dp, Color(0xFFFF5252)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("subtitles_inline_error_banner")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ErrorOutline,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF5252),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = subtitlesError,
+                                        color = Color(0xFFFF8A80),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Visible
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .testTag("dialog_subtitles_models_row"),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SubtitleStyle.ALL_15_MODELS.forEach { style ->
+                                val isSelected = style.id == effectiveSelectedModel.id
+                                SubtitleStyleCardItem(
+                                    style = style,
+                                    isSelected = isSelected,
+                                    onClick = { onSelectSubtitleStyle(style) }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

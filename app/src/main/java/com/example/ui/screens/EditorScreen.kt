@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
@@ -76,6 +77,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.VideoBitratePreset
+import com.example.ui.components.AppAudioLibraryDialog
 import com.example.ui.components.AppMediaGalleryDialog
 import com.example.ui.components.AppZipBrowserDialog
 import com.example.ui.components.CtaVideosCarousel
@@ -83,6 +85,7 @@ import com.example.ui.components.LivePreviewStage
 import com.example.ui.components.MasterConfigDialog
 import com.example.ui.components.MovementsCarousel
 import com.example.ui.components.ProgressLogModal
+import com.example.ui.components.SubtitlesCarousel
 import com.example.ui.components.SyntaxConfigDialog
 import com.example.ui.components.TransitionsCarousel
 import com.example.ui.components.TransitionSoundsCarousel
@@ -156,6 +159,16 @@ fun EditorScreen(
     val logoNormalizedY by viewModel.logoNormalizedY.collectAsStateWithLifecycle()
     val logoScale by viewModel.logoScale.collectAsStateWithLifecycle()
     val isLogoSelectedOnPreview by viewModel.isLogoSelectedOnPreview.collectAsStateWithLifecycle()
+
+    val selectedSubtitleStyle by viewModel.selectedSubtitleStyle.collectAsStateWithLifecycle()
+    val isSubtitlesEnabled by viewModel.isSubtitlesEnabled.collectAsStateWithLifecycle()
+    val subtitlesInputText by viewModel.subtitlesInputText.collectAsStateWithLifecycle()
+    val subtitlesValidationError by viewModel.subtitlesValidationError.collectAsStateWithLifecycle()
+    val masterConfigInitialTab by viewModel.masterConfigInitialTab.collectAsStateWithLifecycle()
+
+    val isAudioLibraryOpen by viewModel.isAudioLibraryOpen.collectAsStateWithLifecycle()
+    val selectedTimelineAudio by viewModel.selectedTimelineAudio.collectAsStateWithLifecycle()
+    val isTimelineAudioPlaying by viewModel.isTimelineAudioPlaying.collectAsStateWithLifecycle()
 
     // ActivityResultLaunchers para seleção de arquivos
 
@@ -414,6 +427,8 @@ fun EditorScreen(
                 onLogoPositionChange = { nx, ny -> viewModel.updateLogoPosition(nx, ny) },
                 onLogoScaleChange = { sc -> viewModel.updateLogoScale(sc) },
                 onRemoveLogo = { viewModel.removeLogo() },
+                selectedSubtitleStyle = selectedSubtitleStyle,
+                previewSubtitleText = "EXEMPLO DE TEXTO DA LEGENDA",
                 modifier = Modifier.padding(horizontal = 14.dp)
             )
 
@@ -421,7 +436,7 @@ fun EditorScreen(
 
             // =========================================================================
             // 2. LINHA DO TEMPO DE VÍDEO PROFISSIONAL (TIMELINE TRACK)
-            // (Exatamente como nos grandes editores de vídeo: régua, playhead, clipes e nós)
+            // (Exatamente como nos grandes editores de vídeo: régua, playhead, clipes, nós e faixa de áudio)
             // =========================================================================
             VideoTimelineTrack(
                 images = images,
@@ -435,6 +450,11 @@ fun EditorScreen(
                 },
                 isPlaying = isTestPlaying,
                 onAddMediaClick = { viewModel.openMediaGallery() },
+                timelineAudio = selectedTimelineAudio,
+                isTimelineAudioPlaying = isTimelineAudioPlaying,
+                onAddOrChangeAudioClick = { viewModel.openAudioLibrary() },
+                onTogglePlayTimelineAudio = { viewModel.togglePlayTimelineAudio() },
+                onDeleteTimelineAudio = { viewModel.deleteTimelineAudio() },
                 modifier = Modifier.padding(horizontal = 14.dp)
             )
 
@@ -514,7 +534,7 @@ fun EditorScreen(
                                 subtitle = if (selectedCta.id == 0) {
                                     "Sem CTA"
                                 } else {
-                                    "${selectedCta.fileName} • ${if (ctaStartTimeText.isNotBlank()) "${ctaStartTimeText}s" else "Definir tempo"}"
+                                    "ID ${selectedCta.id} • ${ctaStartTimeText.ifBlank { "00:00" }}"
                                 },
                                 icon = Icons.Default.Campaign,
                                 accentColor = Color(0xFF00E676),
@@ -522,6 +542,21 @@ fun EditorScreen(
                                 modifier = Modifier
                                     .widthIn(min = itemMinWidth)
                                     .testTag("btn_category_cta")
+                            )
+
+                            ResourceCategoryButton(
+                                title = "LEGENDAS",
+                                subtitle = if (selectedSubtitleStyle.id == 0) {
+                                    if (isSubtitlesEnabled) "Ativadas (Padrão)" else "Sem Legenda"
+                                } else {
+                                    "#${selectedSubtitleStyle.id} ${selectedSubtitleStyle.name}"
+                                },
+                                icon = Icons.Default.Subtitles,
+                                accentColor = Color(0xFFFFD54F),
+                                onClick = { viewModel.openResourcePanel(ResourcePanelTab.SUBTITLES) },
+                                modifier = Modifier
+                                    .widthIn(min = itemMinWidth)
+                                    .testTag("btn_category_subtitles")
                             )
 
                             ResourceCategoryButton(
@@ -585,7 +620,8 @@ fun EditorScreen(
                                             ResourcePanelTab.CAMERA_ANIMATION -> "ANIMAÇÃO DE CÂMERA"
                                             ResourcePanelTab.TRANSITION_EFFECTS -> "EFEITOS DE TRANSIÇÕES"
                                             ResourcePanelTab.TRANSITION_SOUNDS -> "SONS DE TRANSIÇÃO"
-                                            ResourcePanelTab.CTA_VIDEOS -> "CTA • VÍDEOS DE CHAMADA (.WEBM)"
+                                            ResourcePanelTab.CTA_VIDEOS -> "CTA"
+                                            ResourcePanelTab.SUBTITLES -> "LEGENDAS"
                                         },
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.ExtraBold,
@@ -638,6 +674,15 @@ fun EditorScreen(
                                     onCtaStartTimeChange = { viewModel.updateCtaStartTimeText(it) },
                                     ctaTimeError = ctaTimeErrorMessage,
                                     ctaUploadError = null,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            ResourcePanelTab.SUBTITLES -> {
+                                SubtitlesCarousel(
+                                    selectedStyle = selectedSubtitleStyle,
+                                    isSubtitlesEnabledInMenu = isSubtitlesEnabled,
+                                    onSelectStyle = { viewModel.selectSubtitleStyle(it) },
+                                    onOpenSubtitlesConfigInMenu = { viewModel.openMasterConfig(initialTab = 4) },
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
@@ -722,6 +767,15 @@ fun EditorScreen(
         onSyntaxChange = { viewModel.updateSyntaxText(it) },
         onAutoGeneratePrompts = { viewModel.generateAutomaticPrompts() },
         onSaveAndValidateSyntax = { viewModel.validateAndSaveSyntax() },
+        isSubtitlesEnabled = isSubtitlesEnabled,
+        onSubtitlesEnabledChange = { viewModel.setSubtitlesEnabled(it) },
+        subtitlesText = subtitlesInputText,
+        onSubtitlesTextChange = { viewModel.updateSubtitlesInputText(it) },
+        subtitlesError = subtitlesValidationError,
+        onValidateSubtitles = { viewModel.validateSubtitlesInput() },
+        selectedSubtitleStyle = selectedSubtitleStyle,
+        onSelectSubtitleStyle = { viewModel.selectSubtitleStyle(it) },
+        initialTabIndex = masterConfigInitialTab,
         renderingState = renderingState,
         onStartRendering = { viewModel.startRendering(context) },
         onCancelRendering = { viewModel.cancelRendering(context) },
@@ -741,12 +795,24 @@ fun EditorScreen(
         onDismiss = { viewModel.closeSyntaxModal() }
     )
 
-    // Modal de Progresso em Tempo Real
+    // Modal de Progresso em Tempo Real (com suporte à Pausa da Etapa 2 de Legendas)
     ProgressLogModal(
         isOpen = isProgressModalOpen,
         renderingState = renderingState,
         onCancel = { viewModel.cancelRendering(context) },
-        onMinimize = { viewModel.closeProgressModal() }
+        onMinimize = { viewModel.closeProgressModal() },
+        onStage2ContinueWithCorrectedSubtitles = { viewModel.continueStage2WithCorrectedSubtitles(it) },
+        onStage2IgnoreSubtitles = { viewModel.ignoreSubtitlesInStage2() },
+        onStage2ApplyAnyway = { viewModel.applyValidSubtitlesAnywayInStage2() }
+    )
+
+    // Área Profissional de Áudios do Dispositivo (Adicionar / Alterar Áudio na Linha do Tempo)
+    AppAudioLibraryDialog(
+        isOpen = isAudioLibraryOpen,
+        onDismiss = { viewModel.closeAudioLibrary() },
+        onSelectAudioUri = { uri, suggestedName ->
+            viewModel.selectAudioFromLibrary(context, uri, suggestedName)
+        }
     )
 
     // Galeria Exclusiva do Próprio App (exibe apenas mídias de imagens e vídeos para incluir no projeto)

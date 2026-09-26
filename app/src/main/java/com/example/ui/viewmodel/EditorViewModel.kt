@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import android.app.Application
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.media.MediaPlayer
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -12,6 +13,7 @@ import com.example.data.model.CtaVideoItem
 import com.example.data.model.MovementEffect
 import com.example.data.model.Project
 import com.example.data.model.ProjectImage
+import com.example.data.model.SubtitleStyle
 import com.example.data.model.TransitionEffect
 import com.example.data.model.TransitionSoundEffect
 import com.example.data.model.VideoAspectRatio
@@ -27,8 +29,13 @@ import com.example.engine.MediaHelper
 import com.example.engine.RandomPromptResult
 import com.example.engine.RenderingManager
 import com.example.engine.RenderingState
+import com.example.engine.Stage2UserDecision
+import com.example.engine.SubtitleEngine
+import com.example.engine.SubtitleValidationResult
 import com.example.engine.SyntaxParseResult
 import com.example.engine.SyntaxParser
+import com.example.engine.TimelineAudioEngine
+import com.example.engine.TimelineAudioItem
 import com.example.engine.TransitionSoundEngine
 import com.example.engine.TransitionSoundValidationResult
 import com.example.engine.TransitionValidationResult
@@ -50,7 +57,8 @@ enum class ResourcePanelTab {
     CAMERA_ANIMATION,
     TRANSITION_EFFECTS,
     TRANSITION_SOUNDS,
-    CTA_VIDEOS
+    CTA_VIDEOS,
+    SUBTITLES
 }
 
 class EditorViewModel(application: Application) : AndroidViewModel(application) {
@@ -154,7 +162,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _selectedCta = MutableStateFlow(CtaVideoItem.NONE)
     val selectedCta: StateFlow<CtaVideoItem> = _selectedCta.asStateFlow()
 
-    private val _ctaStartTimeText = MutableStateFlow("")
+    private val _ctaStartTimeText = MutableStateFlow("00:00")
     val ctaStartTimeText: StateFlow<String> = _ctaStartTimeText.asStateFlow()
 
     private val _ctaTimeErrorMessage = MutableStateFlow<String?>(null)
@@ -187,6 +195,34 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _isLogoSelectedOnPreview = MutableStateFlow(false)
     val isLogoSelectedOnPreview: StateFlow<Boolean> = _isLogoSelectedOnPreview.asStateFlow()
+
+    // Legendas Profissionais (15 estilos CapCut + Sem Legenda na barra horizontal e configuração no menu Configurar Tudo)
+    private val _selectedSubtitleStyle = MutableStateFlow(SubtitleStyle.NO_SUBTITLE)
+    val selectedSubtitleStyle: StateFlow<SubtitleStyle> = _selectedSubtitleStyle.asStateFlow()
+
+    private val _isSubtitlesEnabled = MutableStateFlow(false)
+    val isSubtitlesEnabled: StateFlow<Boolean> = _isSubtitlesEnabled.asStateFlow()
+
+    private val _subtitlesInputText = MutableStateFlow("")
+    val subtitlesInputText: StateFlow<String> = _subtitlesInputText.asStateFlow()
+
+    private val _subtitlesValidationError = MutableStateFlow<String?>(null)
+    val subtitlesValidationError: StateFlow<String?> = _subtitlesValidationError.asStateFlow()
+
+    private val _masterConfigInitialTab = MutableStateFlow(0)
+    val masterConfigInitialTab: StateFlow<Int> = _masterConfigInitialTab.asStateFlow()
+
+    // Áudio da Linha do Tempo (Adicionar Áudio abaixo das mídias, Play/Pause, Excluir e Alterar)
+    private val _isAudioLibraryOpen = MutableStateFlow(false)
+    val isAudioLibraryOpen: StateFlow<Boolean> = _isAudioLibraryOpen.asStateFlow()
+
+    private val _selectedTimelineAudio = MutableStateFlow<TimelineAudioItem?>(null)
+    val selectedTimelineAudio: StateFlow<TimelineAudioItem?> = _selectedTimelineAudio.asStateFlow()
+
+    private val _isTimelineAudioPlaying = MutableStateFlow(false)
+    val isTimelineAudioPlaying: StateFlow<Boolean> = _isTimelineAudioPlaying.asStateFlow()
+
+    private var timelineAudioPlayer: MediaPlayer? = null
 
     private val _zipWarningMessage = MutableStateFlow<String?>(null)
     val zipWarningMessage: StateFlow<String?> = _zipWarningMessage.asStateFlow()
@@ -372,7 +408,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     _isLogoSelectedOnPreview.value = false
                     _isTestPlaying.value = true
                     _ctaTimeErrorMessage.value = null
-                    _messageEvents.emit("CTA '${newCta.fileName}' carregada com fundo sólido removido automaticamente!")
+                    _messageEvents.emit("CTA ${newCta.id} carregada com fundo sólido removido automaticamente!")
                 }
                 is CtaImportResult.Error -> {
                     val msg = result.message.ifBlank { "Carregue CTA com fundo sólido" }
@@ -492,6 +528,159 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun selectLogoOnPreview() {
         _isLogoSelectedOnPreview.value = true
         _isCtaSelectedOnPreview.value = false
+    }
+
+    // =========================================================================
+    // FUNÇÕES DE LEGENDAS (15 ESTILOS PROFISSIONAIS + CONFIGURAÇÃO NO MENU)
+    // =========================================================================
+
+    fun selectSubtitleStyle(style: SubtitleStyle) {
+        _selectedSubtitleStyle.value = style
+    }
+
+    fun setSubtitlesEnabled(enabled: Boolean) {
+        _isSubtitlesEnabled.value = enabled
+        _subtitlesValidationError.value = null
+        if (enabled && _selectedSubtitleStyle.value.id == 0) {
+            _selectedSubtitleStyle.value = SubtitleStyle.DEFAULT_STYLE
+        }
+    }
+
+    fun updateSubtitlesInputText(newText: String) {
+        _subtitlesInputText.value = newText
+        if (newText.isBlank()) {
+            _subtitlesValidationError.value = null
+            return
+        }
+        when (val result = SubtitleEngine.parseAndValidateSubtitles(newText)) {
+            is SubtitleValidationResult.Success -> {
+                _subtitlesValidationError.value = null
+            }
+            is SubtitleValidationResult.Error -> {
+                _subtitlesValidationError.value = result.message
+            }
+        }
+    }
+
+    fun validateSubtitlesInput(): Boolean {
+        if (!_isSubtitlesEnabled.value) {
+            _subtitlesValidationError.value = null
+            return true
+        }
+        return when (val result = SubtitleEngine.parseAndValidateSubtitles(_subtitlesInputText.value)) {
+            is SubtitleValidationResult.Success -> {
+                _subtitlesValidationError.value = null
+                true
+            }
+            is SubtitleValidationResult.Error -> {
+                _subtitlesValidationError.value = result.message
+                showFiveSecondValidationError(result.message)
+                false
+            }
+        }
+    }
+
+    fun continueStage2WithCorrectedSubtitles(correctedText: String) {
+        _subtitlesInputText.value = correctedText
+        when (val parseResult = SubtitleEngine.parseAndValidateSubtitles(correctedText)) {
+            is SubtitleValidationResult.Success -> {
+                _subtitlesValidationError.value = null
+                RenderingManager.submitStage2Decision(
+                    Stage2UserDecision.RetryWithCorrectedSubtitles(correctedText)
+                )
+            }
+            is SubtitleValidationResult.Error -> {
+                _subtitlesValidationError.value = parseResult.message
+                showFiveSecondValidationError(parseResult.message)
+                RenderingManager.submitStage2Decision(
+                    Stage2UserDecision.RetryWithCorrectedSubtitles(correctedText)
+                )
+            }
+        }
+    }
+
+    fun ignoreSubtitlesInStage2() {
+        RenderingManager.submitStage2Decision(Stage2UserDecision.IgnoreSubtitles)
+    }
+
+    fun applyValidSubtitlesAnywayInStage2() {
+        RenderingManager.submitStage2Decision(Stage2UserDecision.ApplyAnywayValidOnly)
+    }
+
+    // =========================================================================
+    // FUNÇÕES DE ÁUDIO DA LINHA DO TEMPO (ADICIONAR, PLAY/PAUSE, EXCLUIR, ALTERAR)
+    // =========================================================================
+
+    fun openAudioLibrary() {
+        _isAudioLibraryOpen.value = true
+    }
+
+    fun closeAudioLibrary() {
+        TimelineAudioEngine.pauseOrStopAudio()
+        _isAudioLibraryOpen.value = false
+    }
+
+    fun selectAudioFromLibrary(context: Context, uri: Uri, suggestedName: String?) {
+        viewModelScope.launch {
+            val result = TimelineAudioEngine.importAndValidateAudio(context, uri, suggestedName)
+            result.onSuccess { audioItem ->
+                stopTimelineAudioPlayback()
+                _selectedTimelineAudio.value = audioItem
+                _isAudioLibraryOpen.value = false
+                _messageEvents.emit("Áudio '${audioItem.displayName}' adicionado à linha do tempo!")
+            }.onFailure { err ->
+                showFiveSecondValidationError("Selecione um áudio válido")
+                _messageEvents.emit(err.message ?: "Não foi possível carregar o áudio selecionado.")
+            }
+        }
+    }
+
+    fun togglePlayTimelineAudio() {
+        val currentAudio = _selectedTimelineAudio.value ?: return
+        if (_isTimelineAudioPlaying.value) {
+            try {
+                timelineAudioPlayer?.pause()
+            } catch (_: Exception) {}
+            _isTimelineAudioPlaying.value = false
+        } else {
+            try {
+                if (timelineAudioPlayer == null) {
+                    timelineAudioPlayer = MediaPlayer().apply {
+                        setDataSource(currentAudio.filePath)
+                        prepare()
+                        setOnCompletionListener {
+                            _isTimelineAudioPlaying.value = false
+                        }
+                    }
+                }
+                timelineAudioPlayer?.start()
+                _isTimelineAudioPlaying.value = true
+            } catch (e: Exception) {
+                stopTimelineAudioPlayback()
+                viewModelScope.launch {
+                    _messageEvents.emit("Erro ao reproduzir áudio: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun stopTimelineAudioPlayback() {
+        try {
+            timelineAudioPlayer?.stop()
+        } catch (_: Exception) {}
+        try {
+            timelineAudioPlayer?.release()
+        } catch (_: Exception) {}
+        timelineAudioPlayer = null
+        _isTimelineAudioPlaying.value = false
+    }
+
+    fun deleteTimelineAudio() {
+        stopTimelineAudioPlayback()
+        _selectedTimelineAudio.value = null
+        viewModelScope.launch {
+            _messageEvents.emit("Áudio excluído da linha do tempo.")
+        }
     }
 
     private fun showFiveSecondValidationError(shortMessage: String) {
@@ -644,7 +833,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun openMasterConfig() {
+    fun openMasterConfig(initialTab: Int = 0) {
         if (_syntaxText.value.isBlank() && _images.value.isNotEmpty()) {
             _syntaxText.value = SyntaxParser.generateDefaultSyntax(
                 totalImages = _images.value.size,
@@ -652,6 +841,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 videoMediaIndices = getVideoMediaIndices()
             )
         }
+        _masterConfigInitialTab.value = initialTab.coerceIn(0, 5)
         _isMasterConfigOpen.value = true
     }
 
@@ -912,19 +1102,43 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             -1f
         }
 
+        // 5. Valida as Legendas caso estejam ativadas no menu Configurar Tudo
+        if (_isSubtitlesEnabled.value) {
+            when (val subValidation = SubtitleEngine.parseAndValidateSubtitles(_subtitlesInputText.value)) {
+                is SubtitleValidationResult.Success -> {
+                    _subtitlesValidationError.value = null
+                }
+                is SubtitleValidationResult.Error -> {
+                    _subtitlesValidationError.value = subValidation.message
+                    showFiveSecondValidationError(subValidation.message)
+                    _masterConfigInitialTab.value = 4
+                    _isMasterConfigOpen.value = true
+                    return false
+                }
+            }
+        }
+
+        // Pausa reprodução de teste do áudio da linha do tempo ao iniciar renderização
+        stopTimelineAudioPlayback()
+
         val resolution = _selectedResolution.value
         val aspectRatio = _selectedAspectRatio.value
         val (finalWidth, finalHeight) = aspectRatio.calculateDimensions(resolution)
         val fps = _selectedFps.value
         val bitrateBps = (_selectedBitrateMbps.value * 1_000_000).toInt()
         val transitionDuration = _transitionDurationSeconds.value.coerceIn(0.4f, 6.0f)
+        val effectiveSubtitleStyleId = if (_selectedSubtitleStyle.value.id == 0) {
+            SubtitleStyle.DEFAULT_STYLE.id
+        } else {
+            _selectedSubtitleStyle.value.id
+        }
 
         // Abre o modal de progresso
         _isProgressModalOpen.value = true
 
         val effectiveDir = _project.value?.customOutputDirUri ?: appPreferences.getDefaultOutputDirUri()
 
-        // Dispara Foreground Service com parâmetros configurados para exportação unificada
+        // Dispara Foreground Service com parâmetros configurados para exportação unificada em 2 etapas
         VideoRenderingService.start(
             context = context,
             projectId = currentProjectId,
@@ -946,9 +1160,18 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             logoFilePath = _logoFilePath.value,
             logoNormX = _logoNormalizedX.value,
             logoNormY = _logoNormalizedY.value,
-            logoScale = _logoScale.value
+            logoScale = _logoScale.value,
+            isSubtitlesEnabled = _isSubtitlesEnabled.value,
+            subtitlesText = _subtitlesInputText.value,
+            subtitleStyleId = effectiveSubtitleStyleId,
+            timelineAudioPath = _selectedTimelineAudio.value?.filePath
         )
         return true
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopTimelineAudioPlayback()
     }
 
     fun cancelRendering(context: Context) {

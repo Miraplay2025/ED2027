@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -14,6 +15,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -28,15 +30,22 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -65,6 +74,7 @@ import coil.request.ImageRequest
 import com.example.data.model.MovementEffect
 import com.example.data.model.ProjectImage
 import com.example.data.model.TransitionEffect
+import com.example.engine.TimelineAudioItem
 import java.io.File
 
 /**
@@ -73,7 +83,8 @@ import java.io.File
  * - Agulha de reprodução (Playhead) sincronizada
  * - Trilha de vídeo com clipes de mídia contendo miniatura real, número da imagem e duração
  * - Marcadores de transições interativas entre cada clipe
- * - Ao clicar em qualquer mídia carregada, exibe confirmação para excluir e reorganizar os IDs
+ * - Abaixo das mídias na linha do tempo: botão pequeno "Adicionar Áudio" que, ao selecionar um áudio válido,
+ *   é ocultado e exibe o áudio de forma profissional na linha do tempo (com botão Play/Pause no início e opções Excluir/Alterar ao clicar sobre o áudio).
  */
 @Composable
 fun VideoTimelineTrack(
@@ -86,10 +97,17 @@ fun VideoTimelineTrack(
     onSelectTransition: (TransitionEffect) -> Unit,
     isPlaying: Boolean,
     onAddMediaClick: () -> Unit,
+    timelineAudio: TimelineAudioItem? = null,
+    isTimelineAudioPlaying: Boolean = false,
+    onAddOrChangeAudioClick: () -> Unit = {},
+    onTogglePlayTimelineAudio: () -> Unit = {},
+    onDeleteTimelineAudio: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
     var mediaToDelete by remember { mutableStateOf<Pair<Int, ProjectImage>?>(null) }
+    var showAudioActionsMenu by remember(timelineAudio?.filePath) { mutableStateOf(false) }
+    var showConfirmDeleteAudioDialog by remember { mutableStateOf(false) }
 
     Card(
         modifier = modifier
@@ -310,7 +328,279 @@ fun VideoTimelineTrack(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // =========================================================================
+            // TRILHA DE ÁUDIO ABAIXO DAS MÍDIAS NA LINHA DO TEMPO
+            // - Se nenhum áudio estiver selecionado: exibe o botão pequeno "Adicionar Áudio"
+            // - Ao selecionar um áudio válido: oculta o botão "Adicionar Áudio" e exibe o áudio
+            //   de forma profissional na linha do tempo com botão Play/Pause no início e
+            //   opções "Excluir" (com confirmação) e "Alterar" ao clicar sobre o áudio.
+            // =========================================================================
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+            ) {
+                if (timelineAudio == null) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF192231),
+                        border = BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.55f)),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onAddOrChangeAudioClick() }
+                            .testTag("timeline_add_audio_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LibraryMusic,
+                                contentDescription = "Adicionar Áudio",
+                                tint = Color(0xFF00E676),
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Adicionar Áudio",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF00E676)
+                            )
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("timeline_audio_track_container")
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF142426),
+                            border = BorderStroke(
+                                width = if (showAudioActionsMenu) 1.8.dp else 1.2.dp,
+                                color = if (isTimelineAudioPlaying) Color(0xFF00E676) else Color(0xFF2DD4BF).copy(alpha = 0.65f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("timeline_audio_track_bar")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // No início do áudio: ícone de Play que alterna imediatamente com Pause ao clicar
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (isTimelineAudioPlaying) Color(0xFF00E676) else Color(0xFF0F172A),
+                                    border = BorderStroke(1.dp, Color(0xFF00E676)),
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .clickable { onTogglePlayTimelineAudio() }
+                                        .testTag("timeline_audio_play_pause_button")
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = if (isTimelineAudioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                            contentDescription = if (isTimelineAudioPlaying) "Pausar Áudio" else "Reproduzir Áudio",
+                                            tint = if (isTimelineAudioPlaying) Color.Black else Color(0xFF00E676),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(10.dp))
+
+                                // Corpo clicável do áudio na linha do tempo: ao clicar abre as duas opções EXCLUIR e ALTERAR
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { showAudioActionsMenu = !showAudioActionsMenu }
+                                        .padding(vertical = 2.dp)
+                                        .testTag("timeline_audio_body_clickable"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.GraphicEq,
+                                            contentDescription = null,
+                                            tint = Color(0xFF00E676),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = timelineAudio.displayName,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = if (isTimelineAudioPlaying) {
+                                                    "Reproduzindo na Linha do Tempo • Toque para opções"
+                                                } else {
+                                                    "Trilha de Áudio Principal • Toque no áudio para Excluir ou Alterar"
+                                                },
+                                                fontSize = 9.sp,
+                                                color = Color(0xFF94A3B8),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(6.dp))
+
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFF0B1319)
+                                    ) {
+                                        Text(
+                                            text = "♪ ${timelineAudio.formattedDuration}",
+                                            fontSize = 9.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF00E676),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Duas opções exibidas ao clicar sobre o áudio: EXCLUIR e ALTERAR
+                        AnimatedVisibility(visible = showAudioActionsMenu) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp)
+                                    .testTag("timeline_audio_options_row"),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        showAudioActionsMenu = false
+                                        onAddOrChangeAudioClick()
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    border = BorderStroke(1.dp, Color(0xFF00E5FF)),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(34.dp)
+                                        .testTag("timeline_audio_option_change")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.SwapHoriz,
+                                        contentDescription = null,
+                                        tint = Color(0xFF00E5FF),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Alterar",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF00E5FF)
+                                    )
+                                }
+
+                                Button(
+                                    onClick = {
+                                        showConfirmDeleteAudioDialog = true
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFFD32F2F),
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(34.dp)
+                                        .testTag("timeline_audio_option_delete")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Excluir",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // Notificação / Diálogo de confirmação para excluir todo o áudio feito upload na linha do tempo
+    if (showConfirmDeleteAudioDialog && timelineAudio != null) {
+        AlertDialog(
+            onDismissRequest = { showConfirmDeleteAudioDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = {
+                Text(
+                    text = "Confirmar Exclusão de Áudio",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Deseja realmente excluir todo o áudio '${timelineAudio.displayName}' carregado na linha do tempo?"
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showConfirmDeleteAudioDialog = false
+                        showAudioActionsMenu = false
+                        onDeleteTimelineAudio()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    ),
+                    modifier = Modifier.testTag("confirm_delete_timeline_audio_button")
+                ) {
+                    Text("Confirmar Exclusão")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showConfirmDeleteAudioDialog = false },
+                    modifier = Modifier.testTag("cancel_delete_timeline_audio_button")
+                ) {
+                    Text("Cancelar")
+                }
+            }
+        )
     }
 
     // Notificação / Diálogo de confirmação para excluir a mídia carregada ao clicar nela

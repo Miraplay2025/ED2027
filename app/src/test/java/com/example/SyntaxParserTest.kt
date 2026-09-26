@@ -185,5 +185,61 @@ class SyntaxParserTest {
         assertEquals(65.0f, com.example.engine.CtaVideoEngine.parseCtaTimeSeconds("01:05") ?: -1f, 0.01f)
         assertEquals(null, com.example.engine.CtaVideoEngine.parseCtaTimeSeconds(""))
     }
+
+    @Test
+    fun testSubtitlesParsingAndFiveWordDuplicateTimeError() {
+        val validInput = "00:00 + EXEMPLO DE TEXTO DA LEGENDA = 00:13, 00:14 + SEGUNDO TEXTO DE LEGENDA = 00:20"
+        val res = com.example.engine.SubtitleEngine.parseAndValidateSubtitles(validInput)
+        assertTrue(res is com.example.engine.SubtitleValidationResult.Success)
+        val items = (res as com.example.engine.SubtitleValidationResult.Success).items
+        assertEquals(2, items.size)
+        assertEquals(0f, items[0].startTimeSeconds, 0.01f)
+        assertEquals(13f, items[0].endTimeSeconds, 0.01f)
+        assertEquals("EXEMPLO DE TEXTO DA LEGENDA", items[0].text)
+        assertEquals(14f, items[1].startTimeSeconds, 0.01f)
+        assertEquals(20f, items[1].endTimeSeconds, 0.01f)
+        assertEquals("SEGUNDO TEXTO DE LEGENDA", items[1].text)
+
+        // Duas legendas com o mesmo tempo de início -> erro com no máximo 5 palavras na mesma linha
+        val duplicateStart = "00:00 + TEXTO UM = 00:10, 00:00 + TEXTO DOIS = 00:15"
+        val dupStartRes = com.example.engine.SubtitleEngine.parseAndValidateSubtitles(duplicateStart)
+        assertTrue(dupStartRes is com.example.engine.SubtitleValidationResult.Error)
+        val dupStartMsg = (dupStartRes as com.example.engine.SubtitleValidationResult.Error).message
+        assertTrue("Error must not contain line breaks", !dupStartMsg.contains("\n"))
+        assertTrue("Error must have at most 5 words: '$dupStartMsg'", dupStartMsg.trim().split(Regex("\\s+")).size <= 5)
+        assertTrue("Error must show specific faulty time", dupStartMsg.contains("00:00"))
+
+        // Duas legendas com o mesmo tempo final -> erro com no máximo 5 palavras na mesma linha
+        val duplicateEnd = "00:00 + TEXTO UM = 00:13, 00:05 + TEXTO DOIS = 00:13"
+        val dupEndRes = com.example.engine.SubtitleEngine.parseAndValidateSubtitles(duplicateEnd)
+        assertTrue(dupEndRes is com.example.engine.SubtitleValidationResult.Error)
+        val dupEndMsg = (dupEndRes as com.example.engine.SubtitleValidationResult.Error).message
+        assertTrue("Error must not contain line breaks", !dupEndMsg.contains("\n"))
+        assertTrue("Error must have at most 5 words: '$dupEndMsg'", dupEndMsg.trim().split(Regex("\\s+")).size <= 5)
+        assertTrue("Error must show specific faulty time", dupEndMsg.contains("00:13"))
+
+        // 15 modelos de legendas profissionais (primeiro modelo é Minimalista Profissional) + Sem Legenda no carrossel
+        assertEquals(15, com.example.data.model.SubtitleStyle.ALL_15_MODELS.size)
+        assertEquals(1, com.example.data.model.SubtitleStyle.ALL_15_MODELS.first().id)
+        assertEquals("Minimalista Profissional", com.example.data.model.SubtitleStyle.ALL_15_MODELS.first().name)
+        assertEquals("Creative Agency", com.example.data.model.SubtitleStyle.ALL_15_MODELS.last().name)
+        assertEquals(16, com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS.size)
+        assertEquals(0, com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS.first().id)
+        assertEquals("Sem Legenda", com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS.first().name)
+
+        // Verifica propriedades dos novos modelos (1 e 2 linhas, animações fade-in, slide-up, scale-up e fundos semi-transparentes)
+        assertTrue(com.example.data.model.SubtitleStyle.ALL_15_MODELS.any { it.maxLines == 1 })
+        assertTrue(com.example.data.model.SubtitleStyle.ALL_15_MODELS.any { it.maxLines == 2 })
+        assertTrue(com.example.data.model.SubtitleStyle.ALL_15_MODELS.any { it.entryAnimation == com.example.data.model.SubtitleEntryAnimation.FADE_IN })
+        assertTrue(com.example.data.model.SubtitleStyle.ALL_15_MODELS.any { it.entryAnimation == com.example.data.model.SubtitleEntryAnimation.SLIDE_UP })
+        assertTrue(com.example.data.model.SubtitleStyle.ALL_15_MODELS.any { it.entryAnimation == com.example.data.model.SubtitleEntryAnimation.SCALE_UP })
+
+        // Etapa 2: validação contra a duração do vídeo final criado
+        val stage2Check = com.example.engine.SubtitleEngine.checkSubtitlesInFinalVideoDuration(items, 15.0f)
+        assertTrue(stage2Check is com.example.engine.Stage2SubtitleCheckResult.HasInvalidTimes)
+        val invalidInfo = stage2Check as com.example.engine.Stage2SubtitleCheckResult.HasInvalidTimes
+        assertEquals(1, invalidInfo.validSubtitles.size)
+        assertEquals(1, invalidInfo.invalidSubtitles.size)
+    }
 }
 

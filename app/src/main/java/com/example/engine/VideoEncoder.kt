@@ -16,6 +16,8 @@ import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import com.example.data.model.CtaVideoItem
 import com.example.data.model.MovementEffect
+import com.example.data.model.ParsedSubtitleItem
+import com.example.data.model.SubtitleStyle
 import com.example.data.model.TransitionEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -69,6 +71,9 @@ object VideoEncoder {
         transitionDurationSeconds: Float = 1.0f,
         ctaOverlay: CtaRenderOverlayConfig? = null,
         logoOverlay: LogoRenderOverlayConfig? = null,
+        subtitles: List<ParsedSubtitleItem> = emptyList(),
+        subtitleStyle: SubtitleStyle = SubtitleStyle.NO_SUBTITLE,
+        timelineAudioFile: File? = null,
         onGlobalProgress: (currentFrame: Int, totalFrames: Int, currentImageIndex: Int, statusText: String) -> Unit = { _, _, _, _ -> },
         isCancelled: () -> Boolean = { false }
     ): Boolean = withContext(Dispatchers.Default) {
@@ -253,6 +258,29 @@ object VideoEncoder {
                             .coerceIn(0f, (targetHeight - ctaFrameBitmap.height).coerceAtLeast(0).toFloat())
                         paint.alpha = 255
                         canvas.drawBitmap(ctaFrameBitmap, ctaLeft, ctaTop, paint)
+                    }
+                }
+
+                // 3. Legendas (Etapa 2): aplicadas nos tempos específicos fornecidos, sem nunca incluir os tempos,
+                // posicionadas no rodapé do vídeo com corte inteligente e responsivo para que 100% do texto fique visível
+                if (subtitles.isNotEmpty()) {
+                    val currentTimeSec = globalFrameIndex.toFloat() / frameRate.coerceAtLeast(1)
+                    val activeSubtitle = subtitles.firstOrNull { sub ->
+                        currentTimeSec >= sub.startTimeSeconds && currentTimeSec <= sub.endTimeSeconds
+                    }
+                    if (activeSubtitle != null) {
+                        val effectiveStyle = SubtitleStyle.getEffectiveRenderStyle(subtitleStyle.id)
+                        val elapsedInSubtitle = (currentTimeSec - activeSubtitle.startTimeSeconds).coerceAtLeast(0f)
+                        val entryAnimProgress = (elapsedInSubtitle / 0.42f).coerceIn(0f, 1f)
+                        SubtitleEngine.drawSubtitleOnCanvas(
+                            canvas = canvas,
+                            rawPhrase = activeSubtitle.text,
+                            style = effectiveStyle,
+                            canvasWidth = targetWidth,
+                            canvasHeight = targetHeight,
+                            centerInPreview = false,
+                            entryProgress = entryAnimProgress
+                        )
                     }
                 }
 
@@ -510,13 +538,14 @@ object VideoEncoder {
             sceneLayer2.recycle()
             frameBitmap.recycle()
 
-            val hasSound = sequence.any { it.transitionSoundIdToNext != 0 }
-            if (hasSound) {
+            val hasTransitionSound = sequence.any { it.transitionSoundIdToNext != 0 }
+            val hasTimelineAudio = timelineAudioFile != null && timelineAudioFile.exists()
+            if (hasTransitionSound || hasTimelineAudio) {
                 onGlobalProgress(
                     totalGlobalFrames,
                     totalGlobalFrames,
                     sequence.size - 1,
-                    "Sincronizando áudio das transições..."
+                    "Sincronizando áudio no vídeo final..."
                 )
                 applyTransitionAudioTrack(
                     tempVideoFile = rawVideoFile,
@@ -524,7 +553,8 @@ object VideoEncoder {
                     sequence = sequence,
                     itemFrames = itemFrames,
                     frameRate = frameRate,
-                    transitionDurationSeconds = transitionDurationSeconds
+                    transitionDurationSeconds = transitionDurationSeconds,
+                    timelineAudioFile = timelineAudioFile
                 )
             } else {
                 rawVideoFile.copyTo(outputFile, overwrite = true)
@@ -886,13 +916,32 @@ object VideoEncoder {
         }
     }
 
+    fun probeCreatedVideoDurationSeconds(videoFile: File, fallbackDurationSec: Float): Float {
+        if (!videoFile.exists() || videoFile.length() <= 0L) return fallbackDurationSec
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(videoFile.absolutePath)
+            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+            if (durationMs != null && durationMs > 0L) {
+                (durationMs / 1000f).coerceAtLeast(fallbackDurationSec)
+            } else {
+                fallbackDurationSec
+            }
+        } catch (_: Exception) {
+            fallbackDurationSec
+        } finally {
+            try { retriever.release() } catch (_: Exception) {}
+        }
+    }
+
     private fun applyTransitionAudioTrack(
         tempVideoFile: File,
         finalOutputFile: File,
         sequence: List<RenderSequenceItem>,
         itemFrames: List<Int>,
         frameRate: Int,
-        transitionDurationSeconds: Float = 1.0f
+        transitionDurationSeconds: Float = 1.0f,
+        timelineAudioFile: File? = null
     ) {
         try {
             val totalFrames = itemFrames.sum()
@@ -900,6 +949,21 @@ object VideoEncoder {
             val totalSamples = ((totalFrames.toDouble() / frameRate) * sampleRate).toInt().coerceAtLeast(sampleRate)
             val audioPcm = ShortArray(totalSamples)
 
+            // 1. Se o usuário adicionou um áudio na linha do tempo, inclui e preenche o áudio no vídeo final
+            if (timelineAudioFile != null && timelineAudioFile.exists()) {
+                val timelineSamples = TimelineAudioEngine.extractPcmSamplesForMix(
+                    audioFile = timelineAudioFile,
+                    targetSampleCount = totalSamples,
+                    targetSampleRate = sampleRate
+                )
+                for (i in timelineSamples.indices) {
+                    if (i < audioPcm.size) {
+                        audioPcm[i] = timelineSamples[i]
+                    }
+                }
+            }
+
+            // 2. Mixa os sons de transição nas trocas de cena
             var accumulatedFrames = 0
             for (i in sequence.indices) {
                 val totalItemFrames = itemFrames[i]

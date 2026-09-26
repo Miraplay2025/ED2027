@@ -34,7 +34,7 @@ data class CtaVideoItem(
         val DEFAULT_FOLDER_CTAS: List<CtaVideoItem> = listOf(
             CtaVideoItem(
                 id = 1,
-                name = "CTA1.WEBM",
+                name = "1",
                 fileName = "CTA1.WEBM",
                 badgeText = "INSCREVA-SE",
                 description = "Botão animado de Inscreva-se com fundo Chroma Key.",
@@ -43,7 +43,7 @@ data class CtaVideoItem(
             ),
             CtaVideoItem(
                 id = 2,
-                name = "CTA2.WEBM",
+                name = "2",
                 fileName = "CTA2.WEBM",
                 badgeText = "DEIXE O LIKE",
                 description = "Animação de Curtir / Like dinâmico para engajamento.",
@@ -52,7 +52,7 @@ data class CtaVideoItem(
             ),
             CtaVideoItem(
                 id = 3,
-                name = "CTA3.WEBM",
+                name = "3",
                 fileName = "CTA3.WEBM",
                 badgeText = "ATIVE O SININHO",
                 description = "Sininho de notificações pulsando em destaque.",
@@ -61,7 +61,7 @@ data class CtaVideoItem(
             ),
             CtaVideoItem(
                 id = 4,
-                name = "CTA4.WEBM",
+                name = "4",
                 fileName = "CTA4.WEBM",
                 badgeText = "COMPARTILHE",
                 description = "Chamada visual para compartilhar o vídeo.",
@@ -70,7 +70,7 @@ data class CtaVideoItem(
             ),
             CtaVideoItem(
                 id = 5,
-                name = "CTA5.WEBM",
+                name = "5",
                 fileName = "CTA5.WEBM",
                 badgeText = "SIGA O PERFIL",
                 description = "CTA moderno para seguir nas redes sociais.",
@@ -79,7 +79,7 @@ data class CtaVideoItem(
             ),
             CtaVideoItem(
                 id = 6,
-                name = "CTA6.WEBM",
+                name = "6",
                 fileName = "CTA6.WEBM",
                 badgeText = "COMENTE AQUI",
                 description = "Balão animado convidando o público a comentar.",
@@ -88,7 +88,7 @@ data class CtaVideoItem(
             ),
             CtaVideoItem(
                 id = 7,
-                name = "CTA7.WEBM",
+                name = "7",
                 fileName = "CTA7.WEBM",
                 badgeText = "LINK NA BIO",
                 description = "Seta e botão apontando para o Link na Bio/Descrição.",
@@ -97,7 +97,7 @@ data class CtaVideoItem(
             ),
             CtaVideoItem(
                 id = 8,
-                name = "CTA8.WEBM",
+                name = "8",
                 fileName = "CTA8.WEBM",
                 badgeText = "COMPRE AGORA",
                 description = "Selos de oferta e chamada direta para conversão.",
@@ -106,7 +106,7 @@ data class CtaVideoItem(
             ),
             CtaVideoItem(
                 id = 9,
-                name = "CTA9.WEBM",
+                name = "9",
                 fileName = "CTA9.WEBM",
                 badgeText = "SAIBA MAIS",
                 description = "Banner interativo de Saiba Mais com brilho animado.",
@@ -115,7 +115,7 @@ data class CtaVideoItem(
             ),
             CtaVideoItem(
                 id = 10,
-                name = "CTA10.WEBM",
+                name = "10",
                 fileName = "CTA10.WEBM",
                 badgeText = "ASSISTA ATÉ O FIM",
                 description = "Alerta visual dinâmico de retenção de audiência.",

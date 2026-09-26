@@ -86,7 +86,9 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -103,8 +105,10 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.model.MovementEffect
 import com.example.data.model.ProjectImage
+import com.example.data.model.SubtitleStyle
 import com.example.data.model.TransitionEffect
 import com.example.data.model.VideoAspectRatio
+import com.example.engine.SubtitleEngine
 import kotlinx.coroutines.delay
 import java.io.File
 import kotlin.math.PI
@@ -146,6 +150,8 @@ fun LivePreviewStage(
     onLogoPositionChange: (Float, Float) -> Unit = { _, _ -> },
     onLogoScaleChange: (Float) -> Unit = {},
     onRemoveLogo: () -> Unit = {},
+    selectedSubtitleStyle: SubtitleStyle = SubtitleStyle.NO_SUBTITLE,
+    previewSubtitleText: String = "EXEMPLO DE TEXTO DA LEGENDA",
     modifier: Modifier = Modifier
 ) {
     val animProgress = remember { Animatable(0f) }
@@ -538,7 +544,7 @@ fun LivePreviewStage(
                                 if (!activeCtaBitmap.isRecycled) {
                                     Image(
                                         bitmap = activeCtaBitmap.asImageBitmap(),
-                                        contentDescription = "CTA ${selectedCta.fileName}",
+                                        contentDescription = "CTA ${selectedCta.id}",
                                         contentScale = ContentScale.Fit,
                                         modifier = Modifier.fillMaxSize()
                                     )
@@ -681,6 +687,54 @@ fun LivePreviewStage(
                                             modifier = Modifier.size(13.dp)
                                         )
                                     }
+                                }
+                            }
+                        }
+
+                        // =========================================================================
+                        // CAMADA 3: PRÉ-VISUALIZAÇÃO DO ESTILO DE LEGENDA NO CENTRO DA TELA
+                        // (Na tela de pré-visualização: exibido no CENTRO da tela e centralizado,
+                        //  com animação de entrada e suporte a 2 linhas; no vídeo final continua no rodapé)
+                        // =========================================================================
+                        if (selectedSubtitleStyle.id != 0) {
+                            val phraseToDisplay = previewSubtitleText.ifBlank { "EXEMPLO DE TEXTO DA LEGENDA" }
+                            val subtitleEntryAnim = remember(selectedSubtitleStyle.id) { Animatable(0f) }
+
+                            LaunchedEffect(selectedSubtitleStyle.id, isPlaying) {
+                                subtitleEntryAnim.snapTo(0f)
+                                subtitleEntryAnim.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing)
+                                )
+                                while (isPlaying && selectedSubtitleStyle.entryAnimation != com.example.data.model.SubtitleEntryAnimation.NONE) {
+                                    delay(2200L)
+                                    subtitleEntryAnim.snapTo(0f)
+                                    subtitleEntryAnim.animateTo(
+                                        targetValue = 1f,
+                                        animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing)
+                                    )
+                                }
+                            }
+
+                            val currentEntryProgress = subtitleEntryAnim.value
+
+                            androidx.compose.foundation.Canvas(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .testTag("preview_subtitle_overlay")
+                            ) {
+                                val w = size.width.toInt().coerceAtLeast(100)
+                                val h = size.height.toInt().coerceAtLeast(100)
+                                drawIntoCanvas { composeCanvas ->
+                                    SubtitleEngine.drawSubtitleOnCanvas(
+                                        canvas = composeCanvas.nativeCanvas,
+                                        rawPhrase = phraseToDisplay,
+                                        style = selectedSubtitleStyle,
+                                        canvasWidth = w,
+                                        canvasHeight = h,
+                                        centerInPreview = true,
+                                        entryProgress = currentEntryProgress
+                                    )
                                 }
                             }
                         }

@@ -133,20 +133,13 @@ object CtaVideoEngine {
      * - Vídeos de CTA personalizados enviados pelo usuário via Upload
      */
     fun rebuildAvailableCtaList(context: Context, runtimeFolder: File = File(context.filesDir, CTA_FOLDER_NAME)) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val deletedIds = prefs.getStringSet(KEY_DELETED_BUILTIN_IDS, emptySet())
-            ?.mapNotNull { it.toIntOrNull() }
-            ?.toSet() ?: emptySet()
-
-        val folderCtas = CtaVideoItem.DEFAULT_FOLDER_CTAS
-            .filter { it.id !in deletedIds }
-            .map { item ->
-                // Procura o arquivo correspondente na pasta VIDEOS CTA (case-insensitive)
-                val matchedFile = runtimeFolder.listFiles()?.firstOrNull {
-                    it.isFile && it.name.equals(item.fileName, ignoreCase = true)
-                } ?: File(runtimeFolder, item.fileName)
-                item.copy(filePath = matchedFile.absolutePath)
-            }
+        val folderCtas = CtaVideoItem.DEFAULT_FOLDER_CTAS.map { item ->
+            // Procura o arquivo correspondente na pasta VIDEOS CTA (case-insensitive)
+            val matchedFile = runtimeFolder.listFiles()?.firstOrNull {
+                it.isFile && it.name.equals(item.fileName, ignoreCase = true)
+            } ?: File(runtimeFolder, item.fileName)
+            item.copy(filePath = matchedFile.absolutePath, isCustom = false)
+        }
 
         val customCtas = loadCustomCtas(context)
         _availableCtas.value = listOf(CtaVideoItem.NO_CTA) + folderCtas + customCtas
@@ -248,7 +241,7 @@ object CtaVideoEngine {
             }
 
             val currentCustom = loadCustomCtas(context).toMutableList()
-            val nextId = ((currentCustom.maxOfOrNull { it.id } ?: 100) + 1).coerceAtLeast(101)
+            val nextId = ((currentCustom.maxOfOrNull { it.id } ?: 10) + 1).coerceAtLeast(11)
             val cleanTitle = originalName.substringBeforeLast('.')
                 .replace(Regex("[^a-zA-Z0-9_\\- ]"), "")
                 .take(18)
@@ -261,9 +254,9 @@ object CtaVideoEngine {
 
             val newItem = CtaVideoItem(
                 id = nextId,
-                name = finalFileName,
+                name = "$nextId",
                 fileName = finalFileName,
-                badgeText = cleanTitle,
+                badgeText = "$nextId",
                 description = "CTA personalizado sem fundo (Chroma Key ativo)",
                 filePath = destFile.absolutePath,
                 isCustom = true,
@@ -280,21 +273,12 @@ object CtaVideoEngine {
     }
 
     /**
-     * Exclui um vídeo de CTA da lista após confirmação do usuário no diálogo.
+     * Exclui apenas vídeos de CTA que o usuário fez upload usando o botão do app (isCustom == true).
+     * Vídeos carregados da pasta do projeto "VIDEOS CTA" (IDs 1..10) nunca são removidos.
      */
     fun deleteCtaVideo(context: Context, ctaId: Int): Boolean {
-        if (ctaId == 0) return false
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (ctaId in 0..10) return false
         val runtimeFolder = File(context.filesDir, CTA_FOLDER_NAME)
-
-        if (ctaId in 1..10) {
-            val deletedSet = (prefs.getStringSet(KEY_DELETED_BUILTIN_IDS, emptySet()) ?: emptySet()).toMutableSet()
-            deletedSet.add(ctaId.toString())
-            prefs.edit().putStringSet(KEY_DELETED_BUILTIN_IDS, deletedSet).apply()
-            transparentFramesCache.keys.removeAll { it.startsWith("${ctaId}_") }
-            rebuildAvailableCtaList(context, runtimeFolder)
-            return true
-        }
 
         val currentCustom = loadCustomCtas(context).toMutableList()
         val target = currentCustom.find { it.id == ctaId } ?: return false

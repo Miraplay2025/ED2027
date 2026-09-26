@@ -6,6 +6,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,19 +19,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddCircleOutline
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.AlertDialog
@@ -39,10 +43,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,25 +62,26 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.example.data.model.CtaVideoItem
 import com.example.engine.CtaVideoEngine
 import kotlinx.coroutines.delay
+import java.util.Locale
 
 /**
  * Carrossel horizontal de Vídeos de CTA ("VIDEOS CTA"):
  * - O primeiro item é "SEM CTA" para não aplicar nenhum CTA.
- * - Seguido pelos vídeos reais/fake salvos na pasta "VIDEOS CTA" (CTA1.WEBM, CTA2.WEBM, CTA3.WEBM...).
- * - Ao lado do último CTA permite o Upload de um vídeo próprio de CTA com verificação e remoção
- *   automática de fundo sólido (Chroma Key).
- * - Cada CTA carregado possui um botão X para excluir com diálogo de confirmação.
- * - Abaixo exibe o campo obrigatório para informar o tempo exato (em segundos) em que o CTA
- *   deve ser exibido no vídeo final.
+ * - Nas opções de CTA não exibe o nome da CTA, mas sim apenas o ID da CTA: 1, 2, 3...
+ * - Vídeos carregados da pasta do projeto "VIDEOS CTA" NÃO possuem botão X e não podem ser removidos.
+ * - Apenas vídeos de CTA que o usuário fez upload usando o botão no app possuem o botão X para remover (com confirmação).
+ * - Abaixo exibe um campo pequeno e responsivo com o tempo padrão "00:00" onde o usuário não digita:
+ *   ao clicar, abre um Popup onde seleciona o tempo desejado e clica em "Salvar".
  */
 @Composable
 fun CtaVideosCarousel(
@@ -93,6 +97,11 @@ fun CtaVideosCarousel(
     modifier: Modifier = Modifier
 ) {
     var ctaToDelete by remember { mutableStateOf<CtaVideoItem?>(null) }
+    var isTimePickerPopupOpen by remember { mutableStateOf(false) }
+
+    val displayTimeFormatted = remember(ctaStartTimeText) {
+        formatCtaTimeAsMmSs(ctaStartTimeText)
+    }
 
     Column(
         modifier = modifier
@@ -117,12 +126,12 @@ fun CtaVideosCarousel(
                 Spacer(modifier = Modifier.width(6.dp))
                 Column {
                     Text(
-                        text = "Vídeos de CTA (Pasta VIDEOS CTA • .WEBM)",
+                        text = "Vídeos de CTA",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Selecione um CTA para exibir sem fundo na prévia e no vídeo final",
+                        text = "Selecione um ID de CTA para exibir sem fundo na prévia e no vídeo final",
                         style = MaterialTheme.typography.labelSmall,
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -135,7 +144,7 @@ fun CtaVideosCarousel(
                 color = if (selectedCta.id == 0) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primaryContainer
             ) {
                 Text(
-                    text = if (selectedCta.id == 0) "SEM CTA" else selectedCta.fileName,
+                    text = if (selectedCta.id == 0) "SEM CTA" else "CTA ${selectedCta.id}",
                     style = MaterialTheme.typography.labelSmall,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
@@ -147,7 +156,7 @@ fun CtaVideosCarousel(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Barra horizontal rolável com: 0 (SEM CTA) + CTA1.WEBM..CTA10.WEBM + CTAs enviados + Botão Upload
+        // Barra horizontal rolável: 0 (SEM CTA) + IDs 1, 2, 3... + Botão Upload
         LazyRow(
             contentPadding = PaddingValues(horizontal = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -161,7 +170,8 @@ fun CtaVideosCarousel(
                     cta = ctaItem,
                     isSelected = isSelected,
                     onClick = { onSelectCta(ctaItem) },
-                    onDeleteClick = if (ctaItem.id != 0) {
+                    // SOMENTE vídeos enviados pelo usuário (isCustom == true) possuem o botão X para remover!
+                    onDeleteClick = if (ctaItem.isCustom) {
                         { ctaToDelete = ctaItem }
                     } else null
                 )
@@ -209,7 +219,7 @@ fun CtaVideosCarousel(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Campo obrigatório abaixo da lista horizontal para preencher com o tempo exato em que a CTA deve ser exibida no vídeo final
+        // Área compacta com o CAMPO PEQUENO RESPONSIVO de tempo (padrão "00:00", selecionável via Popup ao clicar)
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -228,72 +238,87 @@ fun CtaVideosCarousel(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Schedule,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Tempo Exato de Exibição do CTA no Vídeo Final (Obrigatório)",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                OutlinedTextField(
-                    value = ctaStartTimeText,
-                    onValueChange = onCtaStartTimeChange,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("input_cta_display_time"),
-                    label = {
-                        Text(
-                            text = if (selectedCta.id != 0)
-                                "Tempo exato em segundos para ${selectedCta.fileName} (ex: 3 ou 4.5)"
-                            else
-                                "Selecione um CTA acima e informe o tempo (segundos)",
-                            fontSize = 11.sp
-                        )
-                    },
-                    placeholder = { Text("Ex: 2.5 (segundos no vídeo final)", fontSize = 11.sp) },
-                    singleLine = true,
-                    isError = ctaTimeError != null,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    trailingIcon = {
-                        if (ctaTimeError != null) {
-                            Icon(
-                                imageVector = Icons.Default.ErrorOutline,
-                                contentDescription = "Erro de tempo do CTA",
-                                tint = MaterialTheme.colorScheme.error
+                        Column {
+                            Text(
+                                text = "Tempo de Exibição da CTA",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.5.sp
                             )
-                        } else if (ctaStartTimeText.isNotBlank() && CtaVideoEngine.parseCtaTimeSeconds(ctaStartTimeText) != null) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Tempo válido",
-                                tint = Color(0xFF00E676)
+                            Text(
+                                text = "Toque no campo ao lado para selecionar o tempo",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 9.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = if (ctaTimeError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = if (ctaTimeError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant
-                    ),
-                    shape = RoundedCornerShape(10.dp)
-                )
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // Campo pequeno responsivo com tempo padrão "00:00" que abre o Popup ao clicar
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF141824),
+                        border = BorderStroke(
+                            width = 1.4.dp,
+                            color = if (ctaTimeError != null) MaterialTheme.colorScheme.error else Color(0xFF00E5FF)
+                        ),
+                        modifier = Modifier
+                            .widthIn(min = 96.dp, max = 128.dp)
+                            .height(38.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { isTimePickerPopupOpen = true }
+                            .testTag("input_cta_display_time")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = displayTimeFormatted,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 13.sp,
+                                color = Color.White
+                            )
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = "Selecionar tempo",
+                                tint = Color(0xFF94A3B8),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
 
                 AnimatedVisibility(visible = ctaTimeError != null) {
                     Text(
@@ -306,19 +331,299 @@ fun CtaVideosCarousel(
                             .testTag("cta_time_error_text")
                     )
                 }
-
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Dica: Toque no CTA exibido na tela de pré-visualização acima para arrastar a posição ou ajustar o tamanho.",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = 9.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
     }
 
-    // Notificação / Diálogo para confirmar a exclusão do CTA ao clicar no X
+    // Popup de Seleção de Tempo da CTA (quando o campo pequeno responsivo é clicado)
+    if (isTimePickerPopupOpen) {
+        val initialTotalSec = remember(ctaStartTimeText) {
+            (CtaVideoEngine.parseCtaTimeSeconds(ctaStartTimeText) ?: 0f).coerceAtLeast(0f).toInt()
+        }
+        var selectedMinutes by remember { mutableIntStateOf((initialTotalSec / 60).coerceIn(0, 59)) }
+        var selectedSeconds by remember { mutableIntStateOf((initialTotalSec % 60).coerceIn(0, 59)) }
+        val previewFormatted = String.format(Locale.US, "%02d:%02d", selectedMinutes, selectedSeconds)
+
+        Dialog(onDismissRequest = { isTimePickerPopupOpen = false }) {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF141824)),
+                border = BorderStroke(1.5.dp, Color(0xFF00E5FF).copy(alpha = 0.6f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("cta_time_picker_popup")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Schedule,
+                            contentDescription = null,
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Selecionar Tempo da CTA",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Escolha o minuto e segundo em que a CTA será exibida",
+                        fontSize = 11.sp,
+                        color = Color(0xFF94A3B8),
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Visor Grande do Tempo Selecionado
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF0B0F19),
+                        border = BorderStroke(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f))
+                    ) {
+                        Text(
+                            text = previewFormatted,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 26.sp,
+                            color = Color(0xFF00E5FF),
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Seletores de Minutos e Segundos
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Coluna de Minutos
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "MINUTOS",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF94A3B8)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFF1E293B),
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = {
+                                            selectedMinutes = if (selectedMinutes > 0) selectedMinutes - 1 else 59
+                                        },
+                                        modifier = Modifier.testTag("cta_time_min_minus")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Remove,
+                                            contentDescription = "Diminuir minuto",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = String.format(Locale.US, "%02d", selectedMinutes),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 10.dp)
+                                )
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFF1E293B),
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = {
+                                            selectedMinutes = (selectedMinutes + 1) % 60
+                                        },
+                                        modifier = Modifier.testTag("cta_time_min_plus")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Aumentar minuto",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = ":",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF00E5FF)
+                        )
+
+                        // Coluna de Segundos
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "SEGUNDOS",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF94A3B8)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFF1E293B),
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = {
+                                            selectedSeconds = if (selectedSeconds > 0) selectedSeconds - 1 else 59
+                                        },
+                                        modifier = Modifier.testTag("cta_time_sec_minus")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Remove,
+                                            contentDescription = "Diminuir segundo",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = String.format(Locale.US, "%02d", selectedSeconds),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 10.dp)
+                                )
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFF1E293B),
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = {
+                                            selectedSeconds = (selectedSeconds + 1) % 60
+                                        },
+                                        modifier = Modifier.testTag("cta_time_sec_plus")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Aumentar segundo",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Atalhos rápidos de seleção de tempo
+                    val quickPresets = listOf(0 to 0, 0 to 2, 0 to 5, 0 to 8, 0 to 10, 0 to 15, 0 to 20, 0 to 30, 0 to 45, 1 to 0)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        quickPresets.forEach { (m, s) ->
+                            val label = String.format(Locale.US, "%02d:%02d", m, s)
+                            val isActive = selectedMinutes == m && selectedSeconds == s
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isActive) Color(0xFF00E5FF) else Color(0xFF1E293B),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        selectedMinutes = m
+                                        selectedSeconds = s
+                                    }
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isActive) Color.Black else Color.White,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Botões Cancelar e Salvar
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { isTimePickerPopupOpen = false },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Cancelar", fontSize = 12.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                onCtaStartTimeChange(previewFormatted)
+                                isTimePickerPopupOpen = false
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                                .testTag("save_cta_time_popup_button"),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF00E676),
+                                contentColor = Color.Black
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Salvar",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Notificação / Diálogo para confirmar a exclusão do CTA personalizado enviado pelo usuário
     if (ctaToDelete != null) {
         val target = ctaToDelete!!
         AlertDialog(
@@ -338,7 +643,7 @@ fun CtaVideosCarousel(
             },
             text = {
                 Text(
-                    text = "Deseja realmente excluir o vídeo de CTA '${target.fileName}' da lista?"
+                    text = "Deseja realmente excluir o vídeo de CTA ${target.id} da lista?"
                 )
             },
             confirmButton = {
@@ -365,6 +670,16 @@ fun CtaVideosCarousel(
             }
         )
     }
+}
+
+private fun formatCtaTimeAsMmSs(rawText: String): String {
+    val trimmed = rawText.trim()
+    if (trimmed.isEmpty()) return "00:00"
+    val parsedSeconds = CtaVideoEngine.parseCtaTimeSeconds(trimmed) ?: return "00:00"
+    val totalSecs = parsedSeconds.coerceAtLeast(0f).toInt()
+    val mins = (totalSecs / 60).coerceIn(0, 99)
+    val secs = (totalSecs % 60).coerceIn(0, 59)
+    return String.format(Locale.US, "%02d:%02d", mins, secs)
 }
 
 @Composable
@@ -440,7 +755,7 @@ private fun CtaVideoOptionCard(
                     )
                 }
             } else {
-                // Exibe diretamente o vídeo real salvo na pasta "VIDEOS CTA" (com fundo Chroma Key removido)
+                // Exibe diretamente o vídeo salvo na pasta "VIDEOS CTA" ou enviado pelo usuário
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -451,7 +766,7 @@ private fun CtaVideoOptionCard(
                     if (activeFrame != null && !activeFrame.isRecycled) {
                         Image(
                             bitmap = activeFrame.asImageBitmap(),
-                            contentDescription = cta.fileName,
+                            contentDescription = "CTA ${cta.id}",
                             contentScale = ContentScale.Fit,
                             modifier = Modifier
                                 .fillMaxSize()
@@ -460,22 +775,22 @@ private fun CtaVideoOptionCard(
                     }
                 }
 
-                // Rótulo superior com ID
+                // Rótulo superior com ID numérico (1, 2, 3...)
                 Surface(
                     shape = RoundedCornerShape(bottomEnd = 6.dp),
                     color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.72f),
                     modifier = Modifier.align(Alignment.TopStart)
                 ) {
                     Text(
-                        text = "#${cta.id}",
-                        fontSize = 8.5.sp,
+                        text = "${cta.id}",
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = if (isSelected) MaterialTheme.colorScheme.onPrimary else Color.White,
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
 
-                // Botão X para excluir o CTA carregado (exibe confirmação antes de excluir)
+                // Botão X para excluir APENAS vídeos de CTA carregados via upload pelo usuário (isCustom == true)
                 if (onDeleteClick != null) {
                     Box(
                         modifier = Modifier
@@ -491,14 +806,14 @@ private fun CtaVideoOptionCard(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
-                            contentDescription = "Excluir ${cta.fileName}",
+                            contentDescription = "Excluir CTA ${cta.id}",
                             tint = Color.White,
                             modifier = Modifier.size(12.dp)
                         )
                     }
                 }
 
-                // Rodapé exibindo o nome do arquivo salvo na pasta VIDEOS CTA (ex: CTA1.WEBM, CTA2.WEBM...)
+                // Rodapé exibindo apenas o ID da CTA (1, 2, 3...) sem exibir o nome do arquivo
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -507,9 +822,9 @@ private fun CtaVideoOptionCard(
                         .padding(horizontal = 5.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = cta.fileName,
+                        text = "${cta.id}",
                         color = if (isSelected) Color(0xFF00E5FF) else Color.White,
-                        fontSize = 9.5.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

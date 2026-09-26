@@ -602,7 +602,7 @@ private fun TransitionsTabContent(
 
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Informe os IDs numéricos das transições separados por vírgula (ex: 1, 4, 2, 8). Cada ID deve ser válido entre 1 e 20 (ou 0 para sem transição).",
+                    text = "Informe os IDs numéricos das transições separados por vírgula (ex: 1, 4, 2, 8). Cada ID deve ser válido entre 1 e 30 (ou 0 para sem transição).",
                     fontSize = 11.sp,
                     color = Color(0xFF94A3B8)
                 )
@@ -1128,7 +1128,7 @@ private fun SubtitlesTabContent(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            SubtitleStyle.ALL_15_MODELS.forEach { style ->
+                            SubtitleStyle.MENU_MODELS.forEach { style ->
                                 val isSelected = style.id == effectiveSelectedModel.id
                                 SubtitleStyleCardItem(
                                     style = style,

@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.FilterDrama
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -41,12 +40,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,12 +52,12 @@ import com.example.data.model.TransitionEffect
 import java.util.Locale
 
 /**
- * Carrossel horizontal de Transições Suaves contendo exatamente 20 opções
- * (focadas em dissolução, fumaça, borrão, desfoque e zoom suave) + opção "0 = Sem Transição".
+ * Carrossel horizontal de Efeitos de Transições contendo os 30 efeitos profissionais
+ * + opção "0 = Sem Transição".
  *
  * Abaixo da linha horizontal dos efeitos de transição, exibe a barra onde o usuário pode
- * selecionar a duração da transição entre 0.4 e 6.0 segundos (por padrão 1.0s, o tempo básico normal),
- * usada para todas as transições.
+ * selecionar a duração da transição (0.4s a 6.0s) e exibe em destaque a duração que o usuário
+ * selecionou para ele ver em tempo real.
  */
 @Composable
 fun TransitionsCarousel(
@@ -93,7 +91,7 @@ fun TransitionsCarousel(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Barra de seleção da duração da transição (0.4s a 6.0s, padrão 1.0s normal)
+        // Barra de seleção da duração da transição (0.4s a 6.0s) exibindo a duração que o usuário selecionou
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -118,7 +116,10 @@ fun TransitionsCarousel(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Timer,
                             contentDescription = null,
@@ -128,15 +129,16 @@ fun TransitionsCarousel(
                         Spacer(modifier = Modifier.width(6.dp))
                         Column {
                             Text(
-                                text = "Duração de Todas as Transições",
+                                text = "Duração da Transição: $formattedDuration",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Aplicada de forma igual em todas as transições do vídeo",
-                                fontSize = 9.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "Duração selecionada: $formattedDuration (aplicada nas transições)",
+                                fontSize = 9.5.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -162,38 +164,64 @@ fun TransitionsCarousel(
                             }
                         }
 
+                        // Visor da duração selecionada pelo usuário
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.testTag("selected_transition_duration_badge")
                         ) {
                             Text(
-                                text = if (isDefaultNormal) "$formattedDuration (Normal)" else formattedDuration,
+                                text = if (isDefaultNormal) "$formattedDuration (Normal)" else "Selecionado: $formattedDuration",
+                                fontFamily = FontFamily.Monospace,
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.ExtraBold,
                                 color = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
                     }
                 }
 
-                Slider(
-                    value = transitionDurationSeconds.coerceIn(0.4f, 6.0f),
-                    onValueChange = { raw ->
-                        val rounded = (Math.round(raw * 10f) / 10f).coerceIn(0.4f, 6.0f)
-                        onTransitionDurationChange(rounded)
-                    },
-                    valueRange = 0.4f..6.0f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaterialTheme.colorScheme.primary,
-                        activeTrackColor = MaterialTheme.colorScheme.primary,
-                        inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(32.dp)
-                        .testTag("transition_duration_slider")
-                )
+                // Barra (Slider) + Indicador centralizado na barra mostrando o valor exato selecionado
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Slider(
+                        value = transitionDurationSeconds.coerceIn(0.4f, 6.0f),
+                        onValueChange = { raw ->
+                            val rounded = (Math.round(raw * 10f) / 10f).coerceIn(0.4f, 6.0f)
+                            onTransitionDurationChange(rounded)
+                        },
+                        valueRange = 0.4f..6.0f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(32.dp)
+                            .testTag("transition_duration_slider")
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF141824),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text(
+                            text = formattedDuration,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF00E5FF),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -205,10 +233,10 @@ fun TransitionsCarousel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "1.0s (Básico Normal)",
-                        fontSize = 9.sp,
-                        fontWeight = if (isDefaultNormal) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isDefaultNormal) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "Selecionado: $formattedDuration",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
                     )
                     Text(
                         text = "6.0s (Longa)",
@@ -242,16 +270,19 @@ private fun TransitionItemCard(
 
     val icon: ImageVector = when {
         transition.id == 0 -> Icons.Default.Close
-        transition.id in listOf(1, 7, 12, 16, 17) -> Icons.Default.CropSquare
-        transition.id in listOf(2, 8, 13, 19) -> Icons.Default.FilterDrama
-        transition.id in listOf(3, 6, 9, 11, 14, 20) -> Icons.Default.BlurOn
+        transition.category.contains("Máscara", ignoreCase = true) -> Icons.Default.CropSquare
+        transition.category.contains("Iluminação", ignoreCase = true) ||
+            transition.category.contains("Cinematográfica", ignoreCase = true) -> Icons.Default.AutoAwesome
+        transition.category.contains("Suave", ignoreCase = true) -> Icons.Default.BlurOn
+        transition.category.contains("Movimento", ignoreCase = true) ||
+            transition.category.contains("Posição", ignoreCase = true) -> Icons.Default.FilterDrama
         else -> Icons.Default.ZoomIn
     }
 
     Card(
         modifier = Modifier
-            .width(106.dp)
-            .height(82.dp)
+            .width(122.dp)
+            .height(86.dp)
             .clip(RoundedCornerShape(12.dp))
             .clickable { onClick() }
             .testTag("transition_item_${transition.id}"),
@@ -310,22 +341,22 @@ private fun TransitionItemCard(
                 Text(
                     text = transition.name,
                     style = MaterialTheme.typography.bodySmall,
-                    fontSize = 10.5.sp,
+                    fontSize = 10.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    lineHeight = 13.sp
+                    lineHeight = 12.sp
                 )
 
                 Spacer(modifier = Modifier.height(2.dp))
 
-                // Categoria sutil
+                // Tipo / Categoria
                 Text(
                     text = transition.category,
                     style = MaterialTheme.typography.labelSmall,
                     color = if (isSelected) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 8.5.sp,
+                    fontSize = 8.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

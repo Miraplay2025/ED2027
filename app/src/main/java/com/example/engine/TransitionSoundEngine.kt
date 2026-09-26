@@ -33,18 +33,35 @@ object TransitionSoundEngine {
     private val _customSounds = MutableStateFlow<List<TransitionSoundEffect>>(emptyList())
     val customSounds: StateFlow<List<TransitionSoundEffect>> = _customSounds.asStateFlow()
 
+    const val SOUNDS_FOLDER_NAME = "SONS DE TRANSICOES"
     private const val PREFS_FILE = "custom_transition_sounds.json"
 
     fun init(context: Context) {
         loadCustomSounds(context)
         try {
-            ensureTransitionSoundsMp3Folder(File(context.filesDir, "SONS DE TRANSICOES"))
-            ensureTransitionSoundsMp3Folder(File(context.filesDir, "SONS DE TRASINCOES"))
-            context.getExternalFilesDir(null)?.let { extDir ->
-                ensureTransitionSoundsMp3Folder(File(extDir, "SONS DE TRANSICOES"))
-                ensureTransitionSoundsMp3Folder(File(extDir, "SONS DE TRASINCOES"))
+            val runtimeFolder = File(context.filesDir, SOUNDS_FOLDER_NAME).apply { mkdirs() }
+            syncAssetsAndEnsureSoundsFolder(context, runtimeFolder)
+        } catch (_: Exception) {}
+    }
+
+    private fun syncAssetsAndEnsureSoundsFolder(context: Context, targetFolder: File) {
+        targetFolder.mkdirs()
+        try {
+            val assetFiles = context.assets.list(SOUNDS_FOLDER_NAME) ?: emptyArray()
+            for (assetName in assetFiles) {
+                if (assetName.lowercase().endsWith(".mp3")) {
+                    val outFile = File(targetFolder, assetName)
+                    if (!outFile.exists() || outFile.length() == 0L) {
+                        context.assets.open("$SOUNDS_FOLDER_NAME/$assetName").use { input ->
+                            FileOutputStream(outFile).use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    }
+                }
             }
         } catch (_: Exception) {}
+        ensureTransitionSoundsMp3Folder(targetFolder)
     }
 
     /**

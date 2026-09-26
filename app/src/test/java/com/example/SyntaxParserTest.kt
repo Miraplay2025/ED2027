@@ -143,22 +143,23 @@ class SyntaxParserTest {
         val ids = (validNewSounds as com.example.engine.TransitionSoundValidationResult.Success).soundIds
         assertEquals(listOf(13, 14, 15, 16, 17), ids)
 
-        // Cria e salva na pasta SONS DE TRANSICOES / SONS DE TRASINCOES do projeto todos os 17 áudios em formato .mp3
-        val projectRootFolder1 = java.io.File("../SONS DE TRANSICOES")
-        val projectRootFolder2 = java.io.File("../SONS DE TRASINCOES")
-        val assetsFolder1 = java.io.File("src/main/assets/SONS DE TRANSICOES")
-        val assetsFolder2 = java.io.File("src/main/assets/SONS DE TRASINCOES")
+        // Cria e salva em uma única pasta SONS DE TRANSICOES do projeto todos os 17 áudios em formato .mp3
+        val projectRootFolder = java.io.File("../SONS DE TRANSICOES")
+        val assetsFolder = java.io.File("src/main/assets/SONS DE TRANSICOES")
 
-        val files1 = com.example.engine.TransitionSoundEngine.ensureTransitionSoundsMp3Folder(projectRootFolder1)
-        val files2 = com.example.engine.TransitionSoundEngine.ensureTransitionSoundsMp3Folder(projectRootFolder2)
-        val files3 = com.example.engine.TransitionSoundEngine.ensureTransitionSoundsMp3Folder(assetsFolder1)
-        val files4 = com.example.engine.TransitionSoundEngine.ensureTransitionSoundsMp3Folder(assetsFolder2)
+        val files1 = com.example.engine.TransitionSoundEngine.ensureTransitionSoundsMp3Folder(projectRootFolder)
+        val files2 = com.example.engine.TransitionSoundEngine.ensureTransitionSoundsMp3Folder(assetsFolder)
 
         assertEquals(17, files1.size)
         assertEquals(17, files2.size)
-        assertEquals(17, files3.size)
-        assertEquals(17, files4.size)
         assertTrue(files1.all { it.exists() && it.name.endsWith(".mp3") && it.length() > 100L })
+
+        // Valida os 30 efeitos de transição (0 = Sem Transição + 30 efeitos = 31 itens)
+        assertEquals(31, com.example.data.model.TransitionEffect.ALL_TRANSITIONS.size)
+        assertEquals("Blur Dissolve Cinematográfico", com.example.data.model.TransitionEffect.findById(1)?.name)
+        assertEquals("Efeito de Dissolução por Halogéneo", com.example.data.model.TransitionEffect.findById(30)?.name)
+        assertTrue(SyntaxParser.validateTransitionIds("1, 15, 21, 30") is com.example.engine.TransitionValidationResult.Success)
+        assertTrue(SyntaxParser.validateTransitionIds("31") is com.example.engine.TransitionValidationResult.Error)
     }
 
     @Test
@@ -218,14 +219,17 @@ class SyntaxParserTest {
         assertTrue("Error must have at most 5 words: '$dupEndMsg'", dupEndMsg.trim().split(Regex("\\s+")).size <= 5)
         assertTrue("Error must show specific faulty time", dupEndMsg.contains("00:13"))
 
-        // 15 modelos de legendas profissionais (primeiro modelo é Minimalista Profissional) + Sem Legenda no carrossel
+        // 15 modelos de legendas profissionais + Sem Legenda + Legenda Padrão com Fundo ao lado da opção Sem Legenda
         assertEquals(15, com.example.data.model.SubtitleStyle.ALL_15_MODELS.size)
         assertEquals(1, com.example.data.model.SubtitleStyle.ALL_15_MODELS.first().id)
         assertEquals("Minimalista Profissional", com.example.data.model.SubtitleStyle.ALL_15_MODELS.first().name)
         assertEquals("Creative Agency", com.example.data.model.SubtitleStyle.ALL_15_MODELS.last().name)
-        assertEquals(16, com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS.size)
-        assertEquals(0, com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS.first().id)
-        assertEquals("Sem Legenda", com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS.first().name)
+        assertEquals(17, com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS.size)
+        assertEquals(0, com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS[0].id)
+        assertEquals("Sem Legenda", com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS[0].name)
+        assertEquals("Legenda Padrão com Fundo", com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS[1].name)
+        assertEquals(2, com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS[1].maxLines)
+        assertEquals("Arial", com.example.data.model.SubtitleStyle.CAROUSEL_OPTIONS[1].fontFamily)
 
         // Verifica propriedades dos novos modelos (1 e 2 linhas, animações fade-in, slide-up, scale-up e fundos semi-transparentes)
         assertTrue(com.example.data.model.SubtitleStyle.ALL_15_MODELS.any { it.maxLines == 1 })

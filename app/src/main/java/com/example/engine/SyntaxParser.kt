@@ -245,9 +245,9 @@ object SyntaxParser {
                     faultyId = token
                 )
             }
-            if (id !in 0..20) {
+            if (id !in 0..com.example.data.model.TransitionEffect.MAX_ID) {
                 return TransitionValidationResult.Error(
-                    message = "Transição deve ser entre 0-20",
+                    message = "Transição deve ser entre 0-30",
                     faultyId = token
                 )
             }
@@ -330,7 +330,7 @@ object SyntaxParser {
 
         val transitionCount = (totalImages - 1).coerceAtLeast(1)
         val randomTransitionIds = (1..transitionCount).map {
-            random.nextInt(20) + 1
+            random.nextInt(com.example.data.model.TransitionEffect.MAX_ID) + 1
         }
 
         val poolSounds = if (availableSoundIds.isEmpty()) {

@@ -50,12 +50,15 @@ data class SubtitleStyle(
     val shadowColor: Int = 0x00000000,
     val borderRadiusPx: Float = 0f,
     val isUppercase: Boolean = false,
-    val entryAnimation: SubtitleEntryAnimation = SubtitleEntryAnimation.NONE
+    val entryAnimation: SubtitleEntryAnimation = SubtitleEntryAnimation.NONE,
+    val exitAnimation: String = "none"
 ) {
     val isTwoLineLayout: Boolean
         get() = maxLines >= 2
 
     companion object {
+        const val DEFAULT_STYLE_ID = 100
+
         private fun argbFromHexAndOpacity(hex: String, opacity: Float): Int? {
             if (hex.equals("none", ignoreCase = true) || opacity <= 0f) return null
             val clean = hex.trim().removePrefix("#")
@@ -81,38 +84,70 @@ data class SubtitleStyle(
             hasTextShadow = false,
             borderRadiusPx = 0f,
             isUppercase = false,
-            entryAnimation = SubtitleEntryAnimation.NONE
+            entryAnimation = SubtitleEntryAnimation.NONE,
+            exitAnimation = "none"
         )
 
+        /**
+         * Opção de Legenda Padrão exibida exatamente ao lado da opção "Sem Legenda":
+         * "nome": "Legenda Padrão com Fundo",
+         * "max_lines": 2,
+         * "font_family": "Arial",
+         * "text_color": "#FFFFFF",
+         * "background_type": "box",
+         * "background_color": "#000000",
+         * "background_opacity": 0.5,
+         * "entry_animation": "none",
+         * "exit_animation": "none"
+         */
         val DEFAULT_STYLE = SubtitleStyle(
-            id = 1,
-            name = "Minimalista Profissional",
-            badge = "1 LINHA • FADE-IN",
-            description = "Inter • Transparente • Sombra suave",
-            maxLines = 1,
-            fontFamily = "Inter",
+            id = DEFAULT_STYLE_ID,
+            name = "Legenda Padrão com Fundo",
+            badge = "PADRÃO • 2 LINHAS",
+            description = "Arial • Box #000000 (50%) • 2 Linhas",
+            maxLines = 2,
+            fontFamily = "Arial",
             fontWeight = SubtitleFontWeight.NORMAL,
             textColor = 0xFFFFFFFF.toInt(),
-            backgroundType = SubtitleBackgroundType.TRANSPARENT,
-            backgroundColorHex = "none",
-            backgroundOpacity = 0.0f,
-            backgroundColor = null,
-            textShadowSpec = "0px 2px 4px rgba(0, 0, 0, 0.3)",
-            hasTextShadow = true,
-            shadowDx = 0f,
-            shadowDy = 2f,
-            shadowRadius = 4f,
-            shadowColor = 0x4D000000,
-            borderRadiusPx = 0f,
+            backgroundType = SubtitleBackgroundType.BOX,
+            backgroundColorHex = "#000000",
+            backgroundOpacity = 0.5f,
+            backgroundColor = argbFromHexAndOpacity("#000000", 0.5f),
+            textShadowSpec = "none",
+            hasTextShadow = false,
+            borderRadiusPx = 4f,
             isUppercase = false,
-            entryAnimation = SubtitleEntryAnimation.FADE_IN
+            entryAnimation = SubtitleEntryAnimation.NONE,
+            exitAnimation = "none"
         )
 
         /**
          * Os 15 Modelos Visuais de Legendas especificados:
          */
         val ALL_15_MODELS: List<SubtitleStyle> = listOf(
-            DEFAULT_STYLE,
+            SubtitleStyle(
+                id = 1,
+                name = "Minimalista Profissional",
+                badge = "1 LINHA • FADE-IN",
+                description = "Inter • Transparente • Sombra suave",
+                maxLines = 1,
+                fontFamily = "Inter",
+                fontWeight = SubtitleFontWeight.NORMAL,
+                textColor = 0xFFFFFFFF.toInt(),
+                backgroundType = SubtitleBackgroundType.TRANSPARENT,
+                backgroundColorHex = "none",
+                backgroundOpacity = 0.0f,
+                backgroundColor = null,
+                textShadowSpec = "0px 2px 4px rgba(0, 0, 0, 0.3)",
+                hasTextShadow = true,
+                shadowDx = 0f,
+                shadowDy = 2f,
+                shadowRadius = 4f,
+                shadowColor = 0x4D000000,
+                borderRadiusPx = 0f,
+                isUppercase = false,
+                entryAnimation = SubtitleEntryAnimation.FADE_IN
+            ),
             SubtitleStyle(
                 id = 2,
                 name = "Corporativo Elegante",
@@ -389,14 +424,22 @@ data class SubtitleStyle(
             )
         )
 
-        val CAROUSEL_OPTIONS: List<SubtitleStyle> = listOf(NO_SUBTITLE) + ALL_15_MODELS
+        /**
+         * Na barra horizontal e no menu:
+         * 1º Sem Legenda -> ao lado: Legenda Padrão com Fundo -> seguido pelos 15 modelos visuais.
+         */
+        val CAROUSEL_OPTIONS: List<SubtitleStyle> = listOf(NO_SUBTITLE, DEFAULT_STYLE) + ALL_15_MODELS
+
+        val MENU_MODELS: List<SubtitleStyle> = listOf(DEFAULT_STYLE) + ALL_15_MODELS
 
         fun findById(id: Int): SubtitleStyle {
             if (id == 0) return NO_SUBTITLE
+            if (id == DEFAULT_STYLE_ID) return DEFAULT_STYLE
             return ALL_15_MODELS.find { it.id == id } ?: DEFAULT_STYLE
         }
 
         fun getEffectiveRenderStyle(id: Int): SubtitleStyle {
+            if (id == DEFAULT_STYLE_ID) return DEFAULT_STYLE
             return ALL_15_MODELS.find { it.id == id } ?: DEFAULT_STYLE
         }
     }

@@ -903,7 +903,7 @@ fun LivePreviewStage(
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (isEditingCta)
-                                "Ajustar ${selectedCta.fileName} (Arraste na tela)"
+                                "Ajustar CTA ${selectedCta.id} (Arraste na tela)"
                             else
                                 "Ajustar LOGO (Arraste na tela)",
                             color = Color.White,
@@ -1057,12 +1057,30 @@ private fun PreviewTransitionEffectView(
                         }
                 )
             }
-            1 -> {
-                // 1 = Dissolvência Suave (Cada camada executa seu movimento de câmera em camada separada da transição)
+            2, 13, 15 -> {
+                // 2 = Chicote Horizontal (Whip Pan), 13 = Chicote Diagonal Invertido, 15 = Sombra Projetada por Deslocamento (Slide)
+                val ease = t * t * (3f - 2f * t)
+                val dxFactor1 = when (transition.id) {
+                    2 -> ease * 600f
+                    13 -> ease * 500f
+                    else -> 0f
+                }
+                val dyFactor1 = if (transition.id == 13) -ease * 350f else 0f
+                val dxFactor2 = when (transition.id) {
+                    2 -> (ease - 1f) * 600f
+                    13 -> (ease - 1f) * 500f
+                    else -> (1f - ease) * 600f
+                }
+                val dyFactor2 = if (transition.id == 13) (1f - ease) * 350f else 0f
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer { alpha = 1f - t }
+                        .graphicsLayer {
+                            translationX = dxFactor1
+                            translationY = dyFactor1
+                            alpha = if (transition.id == 15) 1f else 1f - ease * 0.6f
+                        }
                 ) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current).data(file1).build(),
@@ -1078,7 +1096,10 @@ private fun PreviewTransitionEffectView(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer { alpha = t }
+                        .graphicsLayer {
+                            translationX = dxFactor2
+                            translationY = dyFactor2
+                        }
                 ) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current).data(file2).build(),
@@ -1092,14 +1113,53 @@ private fun PreviewTransitionEffectView(
                     )
                 }
             }
-            4 -> {
-                // 4 = Zoom Suave In
+            6 -> {
+                // 6 = Deslocamento Vertical Fluido (Push Up) com desaceleração elástica
+                val c1 = 1.70158f
+                val c3 = c1 + 1f
+                val inv = t - 1f
+                val elastic = (1f + c3 * inv * inv * inv + c1 * inv * inv).coerceIn(0f, 1.06f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { translationY = -elastic * 480f }
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current).data(file1).build(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                if (!isVideo1) movement.applyToGraphicsLayer(this, camProgress1)
+                            }
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { translationY = (1f - elastic) * 480f }
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current).data(file2).build(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                if (!isVideo2) movement.applyToGraphicsLayer(this, camProgress2)
+                            }
+                    )
+                }
+            }
+            3 -> {
+                // 3 = Impacto de Zoom (Punch In)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            scaleX = 1.0f + 0.15f * t
-                            scaleY = 1.0f + 0.15f * t
+                            scaleX = 1.0f + 0.65f * t
+                            scaleY = 1.0f + 0.65f * t
                             alpha = 1f - t
                         }
                 ) {
@@ -1118,8 +1178,8 @@ private fun PreviewTransitionEffectView(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            scaleX = 0.90f + 0.10f * t
-                            scaleY = 0.90f + 0.10f * t
+                            scaleX = 0.60f + 0.40f * t
+                            scaleY = 0.60f + 0.40f * t
                             alpha = t
                         }
                 ) {
@@ -1135,59 +1195,53 @@ private fun PreviewTransitionEffectView(
                     )
                 }
             }
-            5 -> {
-                // 5 = Zoom Suave Out
+            8, 25, 29 -> {
+                // 8 = Zoom Invertido com Recuo (Punch Out), 25 = Íris, 29 = Obturador Helicoidal
+                val isFirstHalf = t < 0.5f
+                val localP = if (isFirstHalf) (1f - t / 0.5f) else ((t - 0.5f) / 0.5f)
+                val rotDeg = if (transition.id == 29) sin(t * Math.PI.toFloat()) * 35f else 0f
+                val activeFile = if (isFirstHalf) file1 else file2
+                val activeVideo = if (isFirstHalf) isVideo1 else isVideo2
+                val activeCam = if (isFirstHalf) camProgress1 else camProgress2
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 1.0f - 0.12f * t
-                            scaleY = 1.0f - 0.12f * t
-                            alpha = 1f - t
-                        }
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
                 ) {
                     AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current).data(file1).build(),
+                        model = ImageRequest.Builder(LocalContext.current).data(activeFile).build(),
                         contentDescription = null,
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
-                                if (!isVideo1) movement.applyToGraphicsLayer(this, camProgress1)
-                            }
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 1.15f - 0.15f * (1f - t)
-                            scaleY = 1.15f - 0.15f * (1f - t)
-                            alpha = t
-                        }
-                ) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current).data(file2).build(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                if (!isVideo2) movement.applyToGraphicsLayer(this, camProgress2)
+                                val s = localP.coerceIn(0.12f, 1f)
+                                scaleX = s
+                                scaleY = s
+                                rotationZ = rotDeg
+                                if (!activeVideo) movement.applyToGraphicsLayer(this, activeCam)
                             }
                     )
                 }
             }
-            10 -> {
-                // 10 = Zoom Cruzado
+            5, 7, 20, 22, 26, 30 -> {
+                // Transições de Iluminação / Película / Vinheta / Halogéneo (5, 7, 20, 22, 26, 30)
+                val sCurve = t * t * (3f - 2f * t)
+                val flashPeak = sin(t * Math.PI.toFloat()).coerceIn(0f, 1f)
+                val overlayColor = when (transition.id) {
+                    5 -> Color(0xFFFFB300).copy(alpha = flashPeak * 0.72f)
+                    7 -> Color.White.copy(alpha = (flashPeak * flashPeak) * 0.92f)
+                    20 -> Color(0xFF065F46).copy(alpha = flashPeak * 0.62f)
+                    22 -> Color(0xFFFF3D00).copy(alpha = flashPeak * 0.78f)
+                    26 -> Color(0xFF4E342E).copy(alpha = flashPeak * 0.70f)
+                    else -> Color(0xFFFFF9C4).copy(alpha = flashPeak * 0.75f)
+                }
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 1.0f + 0.20f * (t * t)
-                            scaleY = 1.0f + 0.20f * (t * t)
-                            alpha = 1f - t
-                        }
+                        .graphicsLayer { alpha = 1f - sCurve }
                 ) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current).data(file1).build(),
@@ -1203,12 +1257,7 @@ private fun PreviewTransitionEffectView(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer {
-                            val s = 0.85f + 0.15f * (1f - (1f - t) * (1f - t))
-                            scaleX = s
-                            scaleY = s
-                            alpha = t
-                        }
+                        .graphicsLayer { alpha = sCurve }
                 ) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current).data(file2).build(),
@@ -1221,11 +1270,17 @@ private fun PreviewTransitionEffectView(
                             }
                     )
                 }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(overlayColor)
+                )
             }
             else -> {
-                // Demais transições suaves com curva não linear e micro-escala em camada independente do movimento de câmera
-                val scale1 = 1.0f + 0.04f * sin(t * Math.PI.toFloat())
-                val scale2 = 1.0f - 0.03f * sin((1f - t) * Math.PI.toFloat())
+                // Demais transições estilizadas, máscaras e suaves em tempo real
+                val peak = sin(t * Math.PI.toFloat())
+                val scale1 = 1.0f + 0.06f * peak
+                val scale2 = 1.0f - 0.04f * peak
                 val sCurve = t * t * (3f - 2f * t)
 
                 Box(

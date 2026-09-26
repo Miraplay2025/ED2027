@@ -48,8 +48,8 @@ import com.example.engine.SubtitleEngine
  * Barra Horizontal de Estilos de Legendas (Exibida ao clicar no botão "LEGENDAS" ao lado de "CTA"):
  * - Sem cabeçalho de texto extra acima da lista (exibe diretamente os modelos).
  * - Primeira opção: "Sem Legenda" (ID 0) para não aplicar nada.
- * - Seguido pelos 15 estilos profissionais (modelos de 2 linhas, modelos com animação de entrada
- *   e 5 modelos com fundo semi-transparente de cores diferentes).
+ * - Ao lado da opção Sem Legenda: "Legenda Padrão com Fundo" (2 linhas, Arial, #FFFFFF, box #000000 50%).
+ * - Seguido pelos 15 estilos profissionais.
  * - Ao clicar em um estilo, a pré-visualização com o texto de legenda de exemplo aparece
  *   centralizada no centro da tela da área de pré-visualização.
  */
@@ -170,7 +170,11 @@ fun SubtitleStyleCardItem(
                         .padding(4.dp)
                 ) {
                     Text(
-                        text = if (style.id == 0) "OFF" else "#${style.id} • ${style.badge}",
+                        text = when (style.id) {
+                            0 -> "OFF"
+                            SubtitleStyle.DEFAULT_STYLE_ID -> style.badge
+                            else -> "#${style.id} • ${style.badge}"
+                        },
                         fontSize = 7.5.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = if (style.id == 0) Color(0xFF94A3B8) else Color(0xFFFFEA00),
